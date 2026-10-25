@@ -21,3 +21,16 @@ python3 tools/macos/build_macos.py
 - 菜单栏图标使用 `client/assets/app.png`。
 - AI 密钥用 Electron safeStorage 保存，在 macOS 上由钥匙串加密，首次保存可能弹出钥匙串授权。
 - `client/verify.cjs`（PowerShell 窗口检查）只适用于 Windows，未打包进 macOS 版。
+
+## 安装包（可选）
+
+```sh
+# ad-hoc 签名的 .app 加 .dmg
+python3 tools/macos/build_macos.py --dmg
+
+# Developer ID 签名（hardened runtime，由内向外逐个签名）+ 公证
+xcrun notarytool store-credentials 小小桌宠-notary   # 只需一次，按提示填 Apple ID / Team ID / App 专用密码
+python3 tools/macos/build_macos.py --dmg --sign "Developer ID Application: 姓名 (TEAMID)" --notarize 小小桌宠-notary
+```
+
+`--notarize` 会提交 .dmg 给 Apple 公证、等待结果并把公证票据钉在 .dmg 上。

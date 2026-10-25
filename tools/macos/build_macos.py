@@ -65,6 +65,55 @@ def make_icns(png, dest):
         run('iconutil', '-c', 'icns', iconset, '-o', dest)
 
 
+ENTITLEMENTS = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>com.apple.security.cs.allow-jit</key><true/>
+<key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+<key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict></plist>
+"""
+
+
+def is_macho(path):
+    with open(path, 'rb') as f:
+        magic = f.read(4)
+    return magic in (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca')
+
+
+def sign(app, identity, workdir):
+    """Ad-hoc ('-') signs the bundle in one go; a Developer ID signs inside-out with the hardened runtime."""
+    if identity == '-':
+        run('codesign', '--force', '--deep', '--sign', '-', app)
+        return
+    entitlements = workdir / 'entitlements.plist'
+    entitlements.write_text(ENTITLEMENTS, 'utf-8')
+    base = ['codesign', '--force', '--timestamp', '--options', 'runtime', '--entitlements', entitlements, '--sign', identity]
+    frameworks = app / 'Contents' / 'Frameworks'
+    files = [p for p in frameworks.rglob('*') if p.is_file() and not p.is_symlink() and is_macho(p)]
+    bundles = [p for p in frameworks.rglob('*') if p.is_dir() and not p.is_symlink() and p.suffix in ('.app', '.framework')]
+    # Deepest first: a bundle's signature seals what is inside it.
+    for item in sorted(files + bundles, key=lambda p: len(p.parts), reverse=True):
+        run(*base, item)
+    run(*base, app)
+
+
+def make_dmg(app, out, identity, notary_profile):
+    staging = out / 'dmg'
+    staging.mkdir()
+    run('ditto', app, staging / app.name)
+    (staging / 'Applications').symlink_to('/Applications')
+    dmg = out / f'{APP_NAME}-{VERSION}-macos-arm64.dmg'
+    run('hdiutil', 'create', '-volname', APP_NAME, '-srcfolder', staging, '-format', 'UDZO', '-ov', dmg)
+    shutil.rmtree(staging)
+    if identity != '-':
+        run('codesign', '--force', '--timestamp', '--sign', identity, dmg)
+    if notary_profile:
+        run('xcrun', 'notarytool', 'submit', dmg, '--keychain-profile', notary_profile, '--wait')
+        run('xcrun', 'stapler', 'staple', dmg)
+    return dmg
+
+
 def write_stub(base, name, source):
     pkg = base / 'node_modules' / name
     pkg.mkdir(parents=True)
@@ -81,7 +130,12 @@ def main():
     parser.add_argument('--electron-zip', type=Path, help='use an already downloaded electron-v*-darwin-*.zip')
     parser.add_argument('--arch', default='arm64', choices=['arm64', 'x64'])
     parser.add_argument('--output', type=Path, help='new folder to create (default outputs/macos/<timestamp>)')
+    parser.add_argument('--sign', default='-', metavar='IDENTITY', help='codesign identity, e.g. "Developer ID Application: Name (TEAMID)"; default ad-hoc')
+    parser.add_argument('--dmg', action='store_true', help='also pack a .dmg next to the app')
+    parser.add_argument('--notarize', metavar='PROFILE', help='notarize and staple the .dmg with this notarytool keychain profile (needs --sign and --dmg)')
     args = parser.parse_args()
+    if args.notarize and (args.sign == '-' or not args.dmg):
+        parser.error('--notarize needs a Developer ID --sign and --dmg')
 
     stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     out = (args.output or ROOT / 'outputs/macos' / stamp).resolve()
@@ -128,9 +182,13 @@ def main():
     write_stub(engine, '@electron-internal/extract-zip', "export default async function extract(){throw new Error('小小桌宠 macOS 版不解压 Electron');}\n")
     shutil.copytree(ROOT / 'characters', res / 'characters')
 
-    run('codesign', '--force', '--deep', '--sign', '-', app)
+    sign(app, args.sign, out)
     run('codesign', '--verify', '--deep', '--strict', app)
-    print(json.dumps({'app': str(app), 'electron': str(zip_path)}, ensure_ascii=False))
+    (out / 'entitlements.plist').unlink(missing_ok=True)
+    result = {'app': str(app), 'electron': str(zip_path)}
+    if args.dmg:
+        result['dmg'] = str(make_dmg(app, out, args.sign, args.notarize))
+    print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == '__main__':
