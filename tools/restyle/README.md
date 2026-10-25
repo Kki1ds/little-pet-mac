@@ -5,8 +5,8 @@ Needs `ffmpeg` with libvpx, `numpy`, `Pillow` and `opencv-python-headless<5`
 (OpenCV 5 dropped `CascadeClassifier`).
 
 ```sh
-python3 tools/restyle/process.py in.webm out.webm [crf]   # recolor one clip
-python3 tools/restyle/qa.py in.webm sheet.png 10          # every 10th frame, iris mask in green
+python tools/restyle/process.py in.webm out.webm [crf]   # recolor one clip
+python tools/restyle/qa.py in.webm sheet.png 10          # every 10th frame, iris mask in green
 ```
 
 Tuning lives at the top of `recolor.py` (`HAIR_SHIFT`, `HAIR_SAT`, `HAIR_VAL`, `EYE_HUE`...).
