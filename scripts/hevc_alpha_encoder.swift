@@ -77,11 +77,12 @@ func encode() throws {
         AVVideoWidthKey: width,
         AVVideoHeightKey: height,
         AVVideoCompressionPropertiesKey: compression,
-        // Tag BT.709 so players don't guess (untagged clips looked lighter than the webm).
+        // Chromium shows the untagged webm clips with the BT.601 matrix; tag the .mov the same
+        // way so both look alike (BT.709 came out visibly lighter on the Mac).
         AVVideoColorPropertiesKey: [
             AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
             AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
-            AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+            AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_601_4,
         ],
     ]
     guard writer.canApply(outputSettings: settings, forMediaType: .video) else {

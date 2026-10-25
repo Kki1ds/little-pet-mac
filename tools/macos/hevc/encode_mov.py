@@ -42,8 +42,8 @@ def main():
     parser.add_argument('--quality', type=float, default=0.75, help='colour quality 0-1 (default 0.75)')
     parser.add_argument('--alpha-quality', type=float, default=1.0,
                         help='alpha quality 0-1 (default 1.0; lower values leave speckles on the edges)')
-    parser.add_argument('--matrix', default='bt709', choices=['bt709', 'bt601'],
-                        help='YUV matrix used to read the webm (default bt709, matching the BT.709 tag on the .mov)')
+    parser.add_argument('--matrix', default='bt601', choices=['bt601', 'bt709'],
+                        help='YUV matrix used to read the webm (default bt601, how Chromium shows the untagged webm)')
     parser.add_argument('--straight', action='store_true',
                         help='do not premultiply (Chromium composites HEVC alpha as premultiplied; straight alpha gives light rims)')
     args = parser.parse_args()
