@@ -129,9 +129,14 @@ def add_mov_clips(characters, cache):
     for char in sorted(p for p in (ROOT / 'characters').iterdir() if (p / 'animations').is_dir()):
         out = cache / char.name
         run(sys.executable, ROOT / 'tools/macos/hevc/encode_mov.py', char / 'animations', '--out-dir', out)
+        dest = characters / char.name / 'animations'
         for mov in out.glob('*.mov'):
             if (char / 'animations' / (mov.stem + '.webm')).exists():
-                shutil.copy2(mov, characters / char.name / 'animations' / mov.name)
+                shutil.copy2(mov, dest / mov.name)
+        # The client replaces seeded .mov files whenever this stamp changes (client/service.cjs syncMov).
+        # It only changes when a clip is re-encoded, so ordinary rebuilds don't recopy everything.
+        newest = max((m.stat().st_mtime_ns for m in out.glob('*.mov')), default=0)
+        (dest / '.mov-build').write_text(f'{cache.name} {newest}', 'utf-8')
 
 
 def main():
