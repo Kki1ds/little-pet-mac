@@ -9,6 +9,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { createServer } from "node:http";
 
+// Lightweight self-use build (little-pet-mac): no balance polling and no 碎碎念. Set by client/service.cjs.
+const LITE = process.env.DSH_PET_LITE === "1";
 //#region src/host/config.ts
 /** 位置角落白名单 */
 const CORNERS = [
@@ -360,8 +362,8 @@ function mergePet(base, raw, label, seenIds) {
 		id,
 		name,
 		size: petNumber(p.size, base.size, 1, label, "size", id),
-		balanceEnabled: petBool(p.balanceEnabled, base.balanceEnabled, label, "balanceEnabled", id),
-		whisperEnabled: petBool(p.whisperEnabled, base.whisperEnabled, label, "whisperEnabled", id),
+		balanceEnabled: !LITE && petBool(p.balanceEnabled, base.balanceEnabled, label, "balanceEnabled", id),
+		whisperEnabled: !LITE && petBool(p.whisperEnabled, base.whisperEnabled, label, "whisperEnabled", id),
 		workStatusEnabled: petBool(p.workStatusEnabled, base.workStatusEnabled, label, "workStatusEnabled", id),
 		fixedEnabled: petBool(p.fixedEnabled, base.fixedEnabled, label, "fixedEnabled", id),
 		display: petEnum(p.display, PET_DISPLAY_SET, base.display, label, "display", id),
@@ -3751,7 +3753,7 @@ function apply(ctx) {
 			try {
 				const cfg = readAllConfig(configPaths);
 				sec = balancePeriodSec(cfg);
-				if (flattenPetList(cfg).some((p) => p.balanceEnabled === true)) await refreshBalance();
+				if (!LITE && flattenPetList(cfg).some((p) => p.balanceEnabled === true)) await refreshBalance();
 			} catch {
 				return;
 			}
@@ -3778,7 +3780,7 @@ function apply(ctx) {
 				let min = Infinity;
 				for (const pet of flattenPetList(cfg)) {
 					const petId = String(pet.id ?? "");
-					if (!petId || pet.whisperEnabled !== true) continue;
+					if (LITE || !petId || pet.whisperEnabled !== true) continue;
 					const sec = whisperPeriodSec(cfg, petId);
 					min = Math.min(min, sec);
 					if (now - (lastWhisperAt.get(petId) ?? 0) < sec * 1e3) continue;

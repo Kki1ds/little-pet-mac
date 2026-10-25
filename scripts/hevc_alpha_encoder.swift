@@ -13,7 +13,7 @@ enum EncoderError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .invalidArguments:
-            return "usage: hevc-alpha-encoder <output.mov> <width> <height> <fps>"
+            return "usage: hevc-alpha-encoder <output.mov> <width> <height> <fps> [quality alphaQuality]"
         case .cannotCreatePixelBuffer:
             return "failed to create a BGRA pixel buffer"
         case .emptyInput:
@@ -51,26 +51,40 @@ func waitUntilReady(_ input: AVAssetWriterInput, writer: AVAssetWriter) throws {
 }
 
 func encode() throws {
-    guard CommandLine.arguments.count == 5,
+    let args = CommandLine.arguments
+    guard args.count == 5 || args.count == 7,
           let width = Int(CommandLine.arguments[2]), width > 0,
           let height = Int(CommandLine.arguments[3]), height > 0,
           let fps = Int32(CommandLine.arguments[4]), fps > 0 else {
         throw EncoderError.invalidArguments
     }
+    // Lossy alpha shows up as speckles along the character's edges, so keep it high.
+    let quality = args.count == 7 ? Double(args[5]) ?? 0.75 : 0.75
+    let alphaQuality = args.count == 7 ? Double(args[6]) ?? 0.75 : 0.75
 
     let outputURL = URL(fileURLWithPath: CommandLine.arguments[1])
     try? FileManager.default.removeItem(at: outputURL)
 
     let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+    // moov atom first: the pet host serves files without Range support.
+    writer.shouldOptimizeForNetworkUse = true
     let compression: [String: Any] = [
-        AVVideoQualityKey: 0.75,
-        kVTCompressionPropertyKey_TargetQualityForAlpha as String: 0.75,
+        AVVideoQualityKey: quality,
+        kVTCompressionPropertyKey_TargetQualityForAlpha as String: alphaQuality,
     ]
     let settings: [String: Any] = [
         AVVideoCodecKey: AVVideoCodecType.hevcWithAlpha,
         AVVideoWidthKey: width,
         AVVideoHeightKey: height,
         AVVideoCompressionPropertiesKey: compression,
+        // The encoder always converts to YUV with BT.709, so the matrix tag must say 709
+        // (a 601 tag turned everything blue). Transfer sRGB matches how Chromium shows the
+        // untagged webm clips (a 709 transfer tag looked too bright). Measured on the Mac.
+        AVVideoColorPropertiesKey: [
+            AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+            AVVideoTransferFunctionKey: "IEC_sRGB",
+            AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+        ],
     ]
     guard writer.canApply(outputSettings: settings, forMediaType: .video) else {
         throw EncoderError.writerFailed("this Mac cannot encode HEVC with alpha")

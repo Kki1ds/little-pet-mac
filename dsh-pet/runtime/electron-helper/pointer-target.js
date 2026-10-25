@@ -28,16 +28,18 @@ const FEET_Y = 330;
  * （底部还多一个 bottomPad，命中区计算用不到）。判定公式与渲染端 sprite.js 的命中判定同源，
  * 故两条通道的判定区域严格一致（报告者补丁里用 width/4 内缩会覆盖整个画布，比身体大一倍多）。
  */
-function spriteHitRect(bounds) {
-  const margin = Math.round(bounds.width / 4);
-  const stageW = bounds.width - margin * 2;
+function spriteHitRect(bounds, margin) {
+  // margin = 渲染端上报的 { l, t, size }（余量可变时必须用它）；没有时按旧的四边各半只宠物推算
+  const ml = margin ? margin.l : Math.round(bounds.width / 4);
+  const mt = margin ? margin.t : ml;
+  const stageW = margin ? margin.size : bounds.width - ml * 2;
   const stageH = (stageW * CANVAS_H) / STAGE_W;
   const bottomPad = (stageH * (CANVAS_H - FEET_Y)) / CANVAS_H;
   return {
-    left: bounds.x + margin + (HIT_BOX.x0 / STAGE_W) * stageW,
-    top: bounds.y + margin + bottomPad + (HIT_BOX.y0 / CANVAS_H) * stageH,
-    right: bounds.x + margin + (HIT_BOX.x1 / STAGE_W) * stageW,
-    bottom: bounds.y + margin + bottomPad + (HIT_BOX.y1 / CANVAS_H) * stageH,
+    left: bounds.x + ml + (HIT_BOX.x0 / STAGE_W) * stageW,
+    top: bounds.y + mt + bottomPad + (HIT_BOX.y0 / CANVAS_H) * stageH,
+    right: bounds.x + ml + (HIT_BOX.x1 / STAGE_W) * stageW,
+    bottom: bounds.y + mt + bottomPad + (HIT_BOX.y1 / CANVAS_H) * stageH,
   };
 }
 
@@ -56,14 +58,14 @@ const OFF_BODY_RELEASE_MS = 400;
  * @param {{x:number,y:number}} point 真实光标位置（DIP）
  * @returns {'outside'|'body'|'margin'} 分区
  */
-function pointerZone(bounds, point) {
+function pointerZone(bounds, point, margin) {
   const inWindow =
     point.x >= bounds.x &&
     point.x < bounds.x + bounds.width &&
     point.y >= bounds.y &&
     point.y < bounds.y + bounds.height;
   if (!inWindow) return 'outside';
-  const r = spriteHitRect(bounds);
+  const r = spriteHitRect(bounds, margin);
   const inSprite = point.x >= r.left && point.x <= r.right && point.y >= r.top && point.y <= r.bottom;
   return inSprite ? 'body' : 'margin';
 }
@@ -98,7 +100,7 @@ function pointerZone(bounds, point) {
  *   新渲染端上报的窗口局部交互矩形。菜单/聊天框只占自己的区域；拖拽仍拥有完整输入租约。
  * @returns {boolean} 新的穿透状态
  */
-function decideWindowIgnore(bounds, point, ignoring, busy, offBodyMs = 0, input) {
+function decideWindowIgnore(bounds, point, ignoring, busy, offBodyMs = 0, input, margin) {
   if (busy) {
     if (!input || input.dragging) return false; // 兼容旧渲染端；拖拽租约绝不被位置判定打断
     const inControl = input.rects.some(
@@ -108,9 +110,9 @@ function decideWindowIgnore(bounds, point, ignoring, busy, offBodyMs = 0, input)
         point.y >= bounds.y + r.y &&
         point.y < bounds.y + r.y + r.height,
     );
-    return !inControl && pointerZone(bounds, point) !== 'body';
+    return !inControl && pointerZone(bounds, point, margin) !== 'body';
   }
-  const zone = pointerZone(bounds, point);
+  const zone = pointerZone(bounds, point, margin);
   if (zone === 'outside') return true; // 窗外：恢复穿透
   if (zone === 'body') return false; // 宠物身上：可交互
   if (offBodyMs >= OFF_BODY_RELEASE_MS) return true; // 余量区停留超时：恢复穿透

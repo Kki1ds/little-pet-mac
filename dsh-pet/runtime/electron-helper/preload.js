@@ -37,8 +37,8 @@ contextBridge.exposeInMainWorld('petBridge', {
   recordRuntime(event, details) {
     ipcRenderer.send('pet:runtime-log', { event, details });
   },
-  setBounds(x, y, width, height, boxX, boxY, size, bottomPad, vx, vy, collisionEnabled, flying) {
-    ipcRenderer.send('pet:set-bounds', { x, y, width, height, boxX, boxY, size, bottomPad, vx, vy, collisionEnabled, flying });
+  setBounds(x, y, width, height, boxX, boxY, size, bottomPad, vx, vy, collisionEnabled, flying, marginL, marginT) {
+    ipcRenderer.send('pet:set-bounds', { x, y, width, height, boxX, boxY, size, bottomPad, vx, vy, collisionEnabled, flying, marginL, marginT });
   },
   setInteractive(interactive) {
     ipcRenderer.send('pet:set-interactive', !!interactive);

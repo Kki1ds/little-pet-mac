@@ -150,6 +150,10 @@ const BUBBLE_DURATION_MS = 10 * 1000; // 余额/碎碎念气泡展示时长（�
 // 窗口四周外扩 = 该比例 × 宠物尺寸：为气泡 / 未来可能的弹窗预留显示空间；
 // 外扩区透明且点击穿透（只有身体命中区可交互）。单点可调——按实际观感改这里。
 const WINDOW_MARGIN_RATIO = 0.5;
+// macOS 本机轻量版：平时窗口只留一圈很窄的余量（每帧移动/合成的透明面积小得多，拖拽不卡），
+// 只有菜单/悬浮提示/对话框打开时才把右侧和下方放宽到 WINDOW_MARGIN_RATIO。
+// 只放宽右下：窗口原点和 sprite 在窗口内的位置都不变，放宽/收回时宠物不会跳。
+const TIGHT_MARGIN_RATIO = 0.02;
 
 // ---------- 全局状态 ----------
 const rootEl = document.getElementById('root');

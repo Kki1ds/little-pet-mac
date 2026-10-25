@@ -8,7 +8,24 @@
 'use strict';
 
 // Keep legacy integrations archived and reversible without exposing their UI.
-const LEGACY_TOOLS_ENABLED = true;
+const LEGACY_TOOLS_ENABLED = false; // lightweight self-use build: no website / balance items
+// Lightweight self-use build: no 碎碎念 / chat (they need a model API).
+const CHAT_TOOLS_ENABLED = false;
+
+// 轻量版没有余额和碎碎念功能，它们的动画分类名会误导：合并成一组「其他动作」，动画照样能点播。
+function liteMenuTree(animations) {
+  const tree = S.buildMenuTree(animations);
+  const groups = tree[0]?.children;
+  if (!groups) return tree;
+  const legacy = new Set(['余额档位', '碎碎念']);
+  const extra = [];
+  for (const g of groups.filter((g) => legacy.has(g.label))) {
+    for (const c of g.children) if (!extra.some((e) => e.anim === c.anim)) extra.push(c);
+  }
+  tree[0].children = groups.filter((g) => !legacy.has(g.label));
+  if (extra.length) tree[0].children.push({ label: '其他动作', children: extra });
+  return tree;
+}
 
 // 两个动作之间的待机时长：控制台可调（见 preload restSeconds），未设置时 20 秒；0 = 原版行为（动作接连播放）
 const DEFAULT_IDLE_REST_MS = 20000;
@@ -57,8 +74,10 @@ class PetSprite {
     window.__dshPetDebug.sideAllow = this.sideAllow;
     // 窗口四周外扩（= WINDOW_MARGIN_RATIO×宠物尺寸）：sprite 钉在 (margin.l, margin.t)，
     // 窗口 = sprite + 四边余量——气泡/未来弹窗显示在余量里；余量透明且点击穿透
-    const m = this.size * WINDOW_MARGIN_RATIO;
+    const m = this.size * TIGHT_MARGIN_RATIO;
     this.margin = { t: m, r: m, b: m, l: m };
+    this.roomy = false; // 右下是否已放宽（见 updateRoom）
+    this.roomTimer = null;
     window.__dshPetDebug.winMargin = this.margin;
     // 宠物包围盒左上角在【工作区】坐标系里的位置（本窗口的位置 = 宠物的位置）
     this.pos = { x: 0, y: 0 };
@@ -326,6 +345,8 @@ class PetSprite {
         fly ? toScreen(fly.vy) : 0,
         !!this.physics?.petCollision,
         !!fly,
+        toScreen(this.margin.l),
+        toScreen(this.margin.t),
       );
     }
     // 位置变了（宠物漫游/拖拽/飞行，窗口跟着动）：提示若正显示必须重摆一次——它跟的是光标，
@@ -439,6 +460,15 @@ class PetSprite {
     });
   }
 
+  // macOS: HEVC-alpha .mov is decoded in hardware, VP9-alpha .webm in software.
+  // Prefer the .mov and fall back to the .webm for clips that have none.
+  animExt(name) {
+    if (!this.movMissing) this.movMissing = new Set();
+    const preferMov = /Mac/.test(navigator.platform) && S.ANIMATION_EXT !== '.mov';
+    if (!preferMov) return S.ANIMATION_EXT || '.webm';
+    return this.movMissing.has(name) ? '.webm' : '.mov';
+  }
+
   switchTo(next, nextOnce) {
     if (!next) return;
     const pending = this.pending;
@@ -460,7 +490,8 @@ class PetSprite {
     // A refreshed fox window must not reuse an hour-old cached replacement clip.
     // Keep a stable revision within the window so ordinary playback still caches.
     const assetRevision = '?v=' + (this.assetRevision ??= Date.now());
-    el.src = this.assetBase + encodeURIComponent(next) + (S.ANIMATION_EXT || '.webm') + assetRevision;
+    const ext = this.animExt(next);
+    el.src = this.assetBase + encodeURIComponent(next) + ext + assetRevision;
     el.loop = !nextOnce;
     el.muted = true;
     el.autoplay = true;
@@ -479,6 +510,13 @@ class PetSprite {
     const loadTimer = window.setTimeout(() => loadGuard('10s 超时'), 10000);
     el.onerror = () => {
       window.clearTimeout(loadTimer);
+      if (ext === '.mov') {
+        // No .mov for this clip (or it failed to decode): play the .webm instead.
+        this.movMissing.add(next);
+        if (this.pending && this.pending.gen === gen) this.pending = null;
+        this.switchTo(next, nextOnce);
+        return;
+      }
       loadGuard('video error');
     };
     el.load();
@@ -530,7 +568,7 @@ class PetSprite {
     this.anim = name;
     this.once = !continuousIdle;
     const front = this.front === 0 ? this.videoA : this.videoB;
-    const url = this.assetBase + encodeURIComponent(name) + (S.ANIMATION_EXT || '.webm');
+    const url = this.assetBase + encodeURIComponent(name) + this.animExt(name);
     if (continuousIdle && front && front.loop && front.readyState >= 2 && front.getAttribute('src') === url) {
       if (this.pendingSquash) {
         this.pendingSquash = false;
@@ -1217,7 +1255,34 @@ class PetSprite {
     const next = !!on;
     if (next === this.tipOn) return;
     this.tipOn = next;
+    this.updateRoom();
     this.renderTip();
+  }
+
+  /**
+   * 菜单/悬浮提示/对话框需要地方显示：打开时把窗口右侧和下方放宽到 WINDOW_MARGIN_RATIO，
+   * 全部关掉后稍等再收回（光标在身体边缘进进出出时不来回改窗口尺寸）。左上不动，宠物不跳。
+   */
+  updateRoom() {
+    const need = this.menuOpen || this.tipOn || this.chatOpen;
+    if (this.roomTimer !== null) {
+      window.clearTimeout(this.roomTimer);
+      this.roomTimer = null;
+    }
+    if (need) this.setRoomy(true);
+    else if (this.roomy) this.roomTimer = window.setTimeout(() => {
+      this.roomTimer = null;
+      this.setRoomy(false);
+    }, 600);
+  }
+
+  setRoomy(roomy) {
+    if (roomy === this.roomy) return;
+    this.roomy = roomy;
+    const m = this.size * (roomy ? WINDOW_MARGIN_RATIO : TIGHT_MARGIN_RATIO);
+    this.margin.r = m;
+    this.margin.b = m;
+    this.sendBounds(this.pos.x, this.pos.y);
   }
 
   /**
@@ -1356,9 +1421,8 @@ class PetSprite {
       ? [{ label: OPEN_TARGET === 'desktop' ? '打开 DeepSeek Harness' : '打开网站', action: 'open-site' }]
       : [];
     if (LEGACY_TOOLS_ENABLED && this.pet.balanceEnabled) tools.push({ label: '查看余额', action: 'show-balance' });
+    if (CHAT_TOOLS_ENABLED) tools.push({ label: '碎碎念', action: 'whisper' }, { label: '对话', action: 'chat' });
     tools.push(
-      { label: '碎碎念', action: 'whisper' },
-      { label: '对话', action: 'chat' },
       { label: '回到初始位置', action: 'home' },
       // 显示位置（仅网页/仅桌面/两者/都不）：改这只宠物的 display 配置 + 宿主重载生效。
       // 与浏览器端注入的是**同一份**子菜单（shared 的 displayMenuBranch），两端文案/取值不会漂移。
@@ -1369,9 +1433,11 @@ class PetSprite {
       // 放在最后：它是"重新加载"这类维护动作，与上面几个宠物互动项语义不同。
       { label: '重载配置', action: 'reload' },
     );
-    const tree = tools.concat(S.buildMenuTree(this.animations));
+    const tree = tools.concat(CHAT_TOOLS_ENABLED ? S.buildMenuTree(this.animations) : liteMenuTree(this.animations));
     if (!tree.length) return;
+    this.setTip(false); // 名字提示别盖住菜单
     this.menuOpen = true;
+    this.updateRoom(); // 先放宽窗口，菜单的可显示范围（visibleClampRect）才算得上新余量
     this.setInteractive(true); // 菜单是窗口内 DOM：悬停期间整窗保持可交互，关闭后恢复命中区穿透
     this.syncInputBusy();
     window.__dshPetDebug.menuOpen = true;
@@ -1385,6 +1451,7 @@ class PetSprite {
       // 菜单被点外/Esc 关闭（非菜单项路径）：同样复位可交互标记，恢复命中区判定
       onClose: () => {
         this.menuOpen = false;
+        this.updateRoom();
         window.__dshPetDebug.menuOpen = false;
         this.syncInputBusy();
         if (!this.inputBusy()) this.setInteractive(false);
@@ -1445,6 +1512,7 @@ class PetSprite {
       this.menuClose = null;
     }
     this.menuOpen = false;
+    this.updateRoom();
     window.__dshPetDebug.menuOpen = false;
     this.syncInputBusy(); // 菜单关：若没有别的占用（拖拽/弹窗）则交还常规判定
     if (!this.inputBusy()) this.setInteractive(false);
@@ -1506,6 +1574,7 @@ class PetSprite {
       onClose: () => {
         this.chatClose = null;
         this.chatOpen = false;
+        this.updateRoom();
         window.__dshPetDebug.chatOpen = false;
         this.syncInputBusy(); // 弹窗关：交还常规判定（菜单还开着的话仍保持忙，见 inputBusy）
         if (!this.menuOpen) this.setInteractive(false); // 弹窗关了且无菜单：恢复命中区穿透
@@ -1513,6 +1582,7 @@ class PetSprite {
     });
     this.chatClose = m.close;
     this.chatOpen = true; // 穿透守卫：弹窗期间整窗保持可交互，光标移到输入框不被翻回穿透
+    this.updateRoom();
     window.__dshPetDebug.chatOpen = true;
     this.syncInputBusy();
     this.setInteractive(true);
