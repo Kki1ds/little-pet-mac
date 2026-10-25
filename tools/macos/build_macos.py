@@ -196,7 +196,7 @@ def main():
     write_stub(engine, '@electron-internal/extract-zip', "export default async function extract(){throw new Error('小小桌宠 macOS 版不解压 Electron');}\n")
     shutil.copytree(ROOT / 'characters', res / 'characters')
     if not args.no_mov:
-        add_mov_clips(res / 'characters', cache / 'mov-q90-a100')  # new folder when encoder settings change
+        add_mov_clips(res / 'characters', cache / 'mov-q75-a100-pm-709')  # new folder when encoder settings change
 
     sign(app, args.sign, out)
     run('codesign', '--verify', '--deep', '--strict', app)

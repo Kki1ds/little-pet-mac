@@ -77,6 +77,12 @@ func encode() throws {
         AVVideoWidthKey: width,
         AVVideoHeightKey: height,
         AVVideoCompressionPropertiesKey: compression,
+        // Tag BT.709 so players don't guess (untagged clips looked lighter than the webm).
+        AVVideoColorPropertiesKey: [
+            AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+            AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+            AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+        ],
     ]
     guard writer.canApply(outputSettings: settings, forMediaType: .video) else {
         throw EncoderError.writerFailed("this Mac cannot encode HEVC with alpha")

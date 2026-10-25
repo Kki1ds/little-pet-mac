@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Convert VP9-alpha .webm clips to HEVC-with-alpha .mov (macOS only).
 
-ffmpeg decodes each webm (libvpx-vp9 keeps the alpha) to raw BGRA frames and
+ffmpeg decodes each webm (libvpx-vp9 keeps the alpha) to premultiplied BGRA frames and
 scripts/hevc_alpha_encoder.swift encodes them with AVFoundation's
 hevcWithAlpha codec, the same pipeline as scripts/encode_hevc_alpha.sh but
 with each clip's own size and frame rate.
@@ -39,9 +39,13 @@ def main():
     parser.add_argument('inputs', nargs='+', type=Path, help='.webm files or folders that contain them')
     parser.add_argument('--out-dir', type=Path, help='write the .mov files here instead of next to each .webm')
     parser.add_argument('--force', action='store_true', help='re-encode even when the .mov is up to date')
-    parser.add_argument('--quality', type=float, default=0.9, help='colour quality 0-1 (default 0.9)')
+    parser.add_argument('--quality', type=float, default=0.75, help='colour quality 0-1 (default 0.75)')
     parser.add_argument('--alpha-quality', type=float, default=1.0,
                         help='alpha quality 0-1 (default 1.0; lower values leave speckles on the edges)')
+    parser.add_argument('--matrix', default='bt709', choices=['bt709', 'bt601'],
+                        help='YUV matrix used to read the webm (default bt709, matching the BT.709 tag on the .mov)')
+    parser.add_argument('--straight', action='store_true',
+                        help='do not premultiply (Chromium composites HEVC alpha as premultiplied; straight alpha gives light rims)')
     args = parser.parse_args()
     if sys.platform != 'darwin':
         raise SystemExit('HEVC with alpha needs macOS (AVFoundation)')
@@ -64,8 +68,11 @@ def main():
             w, h, fps = probe(ffprobe, webm)
             print(f'[{i}/{len(webms)}] {webm.name} {w}x{h}@{fps}', flush=True)
             tmp_mov = mov.with_suffix('.tmp.mov')
+            vf = f'scale=in_color_matrix={args.matrix}:out_color_matrix={args.matrix},format=bgra'
+            if not args.straight:
+                vf += ',premultiply=inplace=1'
             dec = subprocess.Popen([ffmpeg, '-hide_banner', '-loglevel', 'error', '-c:v', 'libvpx-vp9', '-i', str(webm), '-an',
-                                    '-f', 'rawvideo', '-pix_fmt', 'bgra', 'pipe:1'], stdout=subprocess.PIPE)
+                                    '-vf', vf, '-f', 'rawvideo', '-pix_fmt', 'bgra', 'pipe:1'], stdout=subprocess.PIPE)
             enc = subprocess.run([str(encoder), str(tmp_mov), str(w), str(h), str(fps), str(args.quality), str(args.alpha_quality)],
                                  stdin=dec.stdout)
             dec.stdout.close()
