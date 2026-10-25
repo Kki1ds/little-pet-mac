@@ -98,7 +98,7 @@ async function list() {
 }
 async function find(id){const item=(await list()).find(r=>r.id===id);if(!item)throw Error('找不到这个角色，请刷新列表');return item;}
 let writes=Promise.resolve();
-function toggle(id,visible){const operation=writes.then(async()=>{if(typeof visible!=='boolean')throw Error('显示状态无效');await find(id);await request(base+'/pet-display','POST',{id,display:visible?'desktop':'none'});return list();});writes=operation.catch(()=>{});return operation;}
+function toggle(id,visible){const operation=writes.then(async()=>{if(typeof visible!=='boolean')throw Error('显示状态无效');await find(id);unquickHide(id);await request(base+'/pet-display','POST',{id,display:visible?'desktop':'none'});return list();});writes=operation.catch(()=>{});return operation;}
 async function play(id,name){const role=await find(id);if(!role.visible)throw Error('请先让这个角色显示在桌面');if(!role.actions.includes(name))throw Error('这个角色没有该动作');const r=await request(base+'/anim?pet='+encodeURIComponent(id),'POST',{name});if(!r.ok)throw Error(r.message||'动作点播失败');return true;}
 async function importProject(folder) {
   const file=path.join(folder,'config.json'),assets=path.join(folder,'animations');
@@ -116,9 +116,15 @@ async function importProject(folder) {
   catch(e){fs.rmSync(temp,{recursive:true,force:true});throw e;}
   return list();
 }
+// Cmd+Q on a pet (macOS helper) hides it and lists it here; the next app start shows it again.
+// Any console toggle of that role makes its state deliberate, so it leaves the list.
+const quickHiddenFile=path.join(HOME,'pet-control-client','quick-hidden.json');
+function readQuickHidden(){try{const ids=JSON.parse(fs.readFileSync(quickHiddenFile,'utf8'));return Array.isArray(ids)?ids:[];}catch{return [];}}
+function unquickHide(id){const ids=readQuickHidden();if(ids.includes(id))fs.writeFileSync(quickHiddenFile,JSON.stringify(ids.filter(x=>x!==id)));}
+async function restoreQuickHidden(){const ids=readQuickHidden();if(!ids.length)return;const known=new Set((await list()).map(r=>r.id));for(const id of ids)if(known.has(id))await toggle(id,true).catch(e=>console.error('[quick-hide] restore failed:',id,e.message));fs.rmSync(quickHiddenFile,{force:true});}
 const rhythmFile=path.join(HOME,'pet-control-client','pet-rhythm.json');
 function restSeconds(){try{const v=JSON.parse(fs.readFileSync(rhythmFile,'utf8')).restSeconds;if(Number.isFinite(v)&&v>=0)return v;}catch{}return 20;}
 function setRestSeconds(value){if(!Number.isInteger(value)||value<0||value>600)throw Error('动作间隔请填写 0–600 的整数秒');fs.mkdirSync(path.dirname(rhythmFile),{recursive:true});const temp=rhythmFile+'.tmp';fs.writeFileSync(temp,JSON.stringify({restSeconds:value}));fs.renameSync(temp,rhythmFile);return value;}
 function clone(id,remove=false){const operation=writes.then(async()=>{await find(id);await request(base+(remove?'/pet-clone-remove':'/pet-clone'),'POST',{id});return list();});writes=operation.catch(()=>{});return operation;}
 function resize(id,size){const operation=writes.then(async()=>{await find(id);await request(base+'/pet-size','POST',{id,size});return list();});writes=operation.catch(()=>{});return operation;}
-module.exports={restSeconds,setRestSeconds,PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};
+module.exports={quickHiddenFile,restoreQuickHidden,restSeconds,setRestSeconds,PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};

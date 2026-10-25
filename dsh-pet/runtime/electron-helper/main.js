@@ -45,7 +45,7 @@ try {
   );
   process.exit(3);
 }
-const { app, BrowserWindow, ipcMain, screen, shell, protocol } = electronApi;
+const { app, BrowserWindow, ipcMain, screen, shell, protocol, Menu } = electronApi;
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { readFileSync, writeFileSync } = require('node:fs');
@@ -1205,3 +1205,35 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   app.quit();
 });
+
+// macOS: Cmd+Q on a pet would quit this helper and the host would just respawn it. Instead hide the
+// character through the host (same as the console switch) and list it in quick-hidden.json, which
+// the console client reads to show it again on the next app start (client/service.cjs).
+if (process.platform === 'darwin') {
+  let quickHiding = false;
+  const quickHide = async () => {
+    if (quickHiding) return;
+    quickHiding = true;
+    try {
+      const ids = petsFromEnv().map((pet) => pet.id);
+      const file = path.join(process.env.DSH_HOME || path.join(app.getPath('home'), '.dsh'), 'pet-control-client', 'quick-hidden.json');
+      let listed = [];
+      try { listed = JSON.parse(readFileSync(file, 'utf8')); } catch { /* none yet */ }
+      writeFileSync(file, JSON.stringify([...new Set([...(Array.isArray(listed) ? listed : []), ...ids])]));
+      const base = (process.env.DSH_PET_CONFIG_URL || 'http://127.0.0.1:3080/dsh-pet-7340/config').replace(/\/config$/, '');
+      for (const id of ids) {
+        const res = await fetch(base + '/pet-display', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, display: 'none' }) });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+      }
+    } catch (error) {
+      console.error('[dsh-pet-desktop-helper] quick hide failed:', error);
+      quickHiding = false;
+    }
+  };
+  app.whenReady().then(() => {
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { label: app.name, submenu: [{ label: '暂时隐藏这个角色', accelerator: 'Command+Q', click: () => void quickHide() }] },
+      { role: 'editMenu' },
+    ]));
+  });
+}

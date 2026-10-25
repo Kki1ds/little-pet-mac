@@ -19,6 +19,9 @@ if(!app.requestSingleInstanceLock()){app.quit();}else if(process.argv.includes('
   if(ai){const chatBridge=await require('./chat-bridge.cjs').startChatBridge({ai});service.setChatBridge(chatBridge.env);app.once('before-quit',()=>chatBridge.close());}
   await applyDock();
   try{await service.ensureServer();}catch(e){dialog.showErrorBox('桌宠启动失败',e.message);app.quit();return;}
+  try{await service.restoreQuickHidden();}catch(e){console.error('[quick-hide]',e.message);}
+  // A pet hidden with Cmd+Q writes this file; refresh the console's switches when it changes.
+  fs.watchFile(service.quickHiddenFile,{interval:1000},()=>{service.list().then(publishRoles).catch(()=>{});});app.once('before-quit',()=>fs.unwatchFile(service.quickHiddenFile));
   try{const {startRoleAudit}=require(path.join(service.PACKAGE,'runtime/electron-helper/role-log.js'));const stopAudit=startRoleAudit({root:service.ROOT});app.once('before-quit',stopAudit);}catch(e){console.error('[pet-log] audit start failed:',e.message);}
   try{const broker=require(path.join(service.PACKAGE,'runtime/electron-helper/collision-link.cjs')).startBroker();broker.ready.catch(e=>console.error('[collision]',e.message));app.once('before-quit',()=>{void broker.close();});}catch(e){console.error('[collision] start failed:',e.message);}
   window=new BrowserWindow({width:1100,height:780,minWidth:800,minHeight:620,title:'小小桌宠',backgroundColor:'#faf8f4',autoHideMenuBar:true,show:false,icon:appIcon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
