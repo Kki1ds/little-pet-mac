@@ -10,6 +10,18 @@
 // Keep legacy integrations archived and reversible without exposing their UI.
 const LEGACY_TOOLS_ENABLED = true;
 
+// 两个动作之间的待机时长（毫秒）；0 = 原版行为（动作接连播放）
+const IDLE_REST_MS = 20000;
+const POS_KEY_PREFIX = 'dsh-pet-position:';
+function readSavedPos(id) {
+  try {
+    const v = JSON.parse(localStorage.getItem(POS_KEY_PREFIX + id) || 'null');
+    return v && Number.isFinite(v.rx) && Number.isFinite(v.ry) ? { rx: v.rx, ry: v.ry } : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------- 单只宠物（行为与浏览器 PetCard 一致；纯逻辑来自 src/shared） ----------
 class PetSprite {
   constructor(pet) {
@@ -89,7 +101,22 @@ class PetSprite {
     this.moveRef = null;
     this.moveToken = 0;
     this.pendingMove = null;
-    this.customPos = null; // 拖拽后的会话内位置（{rx, ry} 比例）；restart 回角落
+    // 拖拽/漫游后的位置（{rx, ry} 比例）。每个角色 Helper 有独立 userData，存进 localStorage 后重开沿用；
+    // 「回到初始位置」清掉它回到配置角落。
+    this._customPos = null;
+    this.restUntil = 0;
+    this.restFrom = null;
+    this.restToken = 0;
+    this.restTimer = null;
+    this._posSaveTimer = null;
+    this._restorePos = readSavedPos(this.pet.id);
+    Object.defineProperty(this, 'customPos', {
+      get: () => this._customPos,
+      set: (value) => {
+        this._customPos = value;
+        this.schedulePosSave();
+      },
+    });
     // 右键菜单（统一自绘组件，两端共用同一份：树+渲染均来自 shared-core）
     this.menuOpen = false; // 菜单开启期间强制整窗可交互（悬停菜单不触发穿透翻转）
     this.menuClose = null; // 当前菜单的 close()（打开时挂载，关闭后置空）
@@ -310,6 +337,15 @@ class PetSprite {
     const H = VIEW.h;
     let x;
     let y;
+    if (this._restorePos && AREAS.length) {
+      // 只还原仍落在某块显示器上的位置：拔掉外接屏后不让宠物停在看不见的地方
+      const saved = this._restorePos;
+      this._restorePos = null;
+      const cx = saved.rx * W;
+      const cy = saved.ry * H;
+      const p = S.clampPointToRegion(AREAS, cx, cy);
+      if (p.x === cx && p.y === cy) this._customPos = saved;
+    }
     if (this.customPos) {
       x = this.customPos.rx * W - this.halfW;
       y = this.customPos.ry * H - this.halfH;
@@ -506,10 +542,14 @@ class PetSprite {
     this.stopMove();
     const { animations, animationWeights } = { animations: this.animations, animationWeights: this.weights };
     const smallActions = animations.categories.find((c) => c.id === '小动作')?.actions;
+    if (this.restBeforeNextAction()) return;
     if ((this.assetRoot === 'ojousama' || /^character\d+$/.test(this.assetRoot)) && smallActions?.length && !this.workOn) {
       // Rotate every small action, including the idle entry, without repeating
       // the same clip through a fade when the category contains only one item.
-      const next = smallActions[(smallActions.indexOf(this.anim) + 1) % smallActions.length];
+      const from = smallActions.includes(this.restFrom) ? this.restFrom : this.anim;
+      this.restFrom = null;
+      let next = smallActions[(smallActions.indexOf(from) + 1) % smallActions.length];
+      if (next === animations.idle[0] && smallActions.length > 1) next = smallActions[(smallActions.indexOf(next) + 1) % smallActions.length];
       if (S.isNoMirrorAnimation(animations.categories, next)) this.facing = 'left';
       this.playOnce(next);
       return;
@@ -540,6 +580,41 @@ class PetSprite {
       next = act.name;
     }
     this.playOnce(next);
+  }
+
+  /**
+   * 动作之间先待机休息 IDLE_REST_MS，再播下一个动作（自用版：原版动作一个接一个，太频繁）。
+   * 返回 true = 本次已改为播待机，调用方不再选动作。
+   */
+  restBeforeNextAction() {
+    const idle = this.animations.idle[0];
+    if (!idle || IDLE_REST_MS <= 0 || this.workOn) return false;
+    if (this.restUntil && Date.now() < this.restUntil) {
+      this.armRestTimer(this.restUntil - Date.now());
+      this.playOnce(idle);
+      return true;
+    }
+    if (this.restUntil) {
+      this.restUntil = 0;
+      return false;
+    }
+    if (this.anim === idle) return false;
+    this.restFrom = this.anim;
+    this.restUntil = Date.now() + IDLE_REST_MS;
+    this.armRestTimer(IDLE_REST_MS);
+    this.playOnce(idle);
+    return true;
+  }
+
+  // 循环播放的待机不会触发 ended，靠定时器把宠物叫回动作链
+  armRestTimer(ms) {
+    const token = ++this.restToken;
+    clearTimeout(this.restTimer);
+    this.restTimer = setTimeout(() => {
+      if (token !== this.restToken || this.anim !== this.animations.idle[0]) return;
+      if (this.dragState.active || this.throwRef !== null || this.moveRef !== null || this.workOn) return;
+      this.playIdle();
+    }, ms + 50);
   }
 
   handleEnded() {
@@ -1433,6 +1508,17 @@ class PetSprite {
     window.__dshPetDebug.chatOpen = true;
     this.syncInputBusy();
     this.setInteractive(true);
+  }
+
+  schedulePosSave() {
+    clearTimeout(this._posSaveTimer);
+    this._posSaveTimer = setTimeout(() => {
+      try {
+        const key = POS_KEY_PREFIX + this.pet.id;
+        if (this._customPos) localStorage.setItem(key, JSON.stringify(this._customPos));
+        else localStorage.removeItem(key);
+      } catch {}
+    }, 400);
   }
 
   // 「回到初始位置」菜单：停掉漫游/移动，清掉拖拽/漫游留下的会话位置，回到配置角落
