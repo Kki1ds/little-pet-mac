@@ -13,7 +13,7 @@ enum EncoderError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .invalidArguments:
-            return "usage: hevc-alpha-encoder <output.mov> <width> <height> <fps>"
+            return "usage: hevc-alpha-encoder <output.mov> <width> <height> <fps> [quality alphaQuality]"
         case .cannotCreatePixelBuffer:
             return "failed to create a BGRA pixel buffer"
         case .emptyInput:
@@ -51,12 +51,16 @@ func waitUntilReady(_ input: AVAssetWriterInput, writer: AVAssetWriter) throws {
 }
 
 func encode() throws {
-    guard CommandLine.arguments.count == 5,
+    let args = CommandLine.arguments
+    guard args.count == 5 || args.count == 7,
           let width = Int(CommandLine.arguments[2]), width > 0,
           let height = Int(CommandLine.arguments[3]), height > 0,
           let fps = Int32(CommandLine.arguments[4]), fps > 0 else {
         throw EncoderError.invalidArguments
     }
+    // Lossy alpha shows up as speckles along the character's edges, so keep it high.
+    let quality = args.count == 7 ? Double(args[5]) ?? 0.75 : 0.75
+    let alphaQuality = args.count == 7 ? Double(args[6]) ?? 0.75 : 0.75
 
     let outputURL = URL(fileURLWithPath: CommandLine.arguments[1])
     try? FileManager.default.removeItem(at: outputURL)
@@ -65,8 +69,8 @@ func encode() throws {
     // moov atom first: the pet host serves files without Range support.
     writer.shouldOptimizeForNetworkUse = true
     let compression: [String: Any] = [
-        AVVideoQualityKey: 0.75,
-        kVTCompressionPropertyKey_TargetQualityForAlpha as String: 0.75,
+        AVVideoQualityKey: quality,
+        kVTCompressionPropertyKey_TargetQualityForAlpha as String: alphaQuality,
     ]
     let settings: [String: Any] = [
         AVVideoCodecKey: AVVideoCodecType.hevcWithAlpha,
