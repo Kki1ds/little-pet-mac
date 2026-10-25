@@ -12,6 +12,21 @@ const LEGACY_TOOLS_ENABLED = false; // lightweight self-use build: no website / 
 // Lightweight self-use build: no 碎碎念 / chat (they need a model API).
 const CHAT_TOOLS_ENABLED = false;
 
+// 轻量版没有余额和碎碎念功能，它们的动画分类名会误导：合并成一组「其他动作」，动画照样能点播。
+function liteMenuTree(animations) {
+  const tree = S.buildMenuTree(animations);
+  const groups = tree[0]?.children;
+  if (!groups) return tree;
+  const legacy = new Set(['余额档位', '碎碎念']);
+  const extra = [];
+  for (const g of groups.filter((g) => legacy.has(g.label))) {
+    for (const c of g.children) if (!extra.some((e) => e.anim === c.anim)) extra.push(c);
+  }
+  tree[0].children = groups.filter((g) => !legacy.has(g.label));
+  if (extra.length) tree[0].children.push({ label: '其他动作', children: extra });
+  return tree;
+}
+
 // 两个动作之间的待机时长：控制台可调（见 preload restSeconds），未设置时 20 秒；0 = 原版行为（动作接连播放）
 const DEFAULT_IDLE_REST_MS = 20000;
 function idleRestMs() {
@@ -1418,8 +1433,9 @@ class PetSprite {
       // 放在最后：它是"重新加载"这类维护动作，与上面几个宠物互动项语义不同。
       { label: '重载配置', action: 'reload' },
     );
-    const tree = tools.concat(S.buildMenuTree(this.animations));
+    const tree = tools.concat(CHAT_TOOLS_ENABLED ? S.buildMenuTree(this.animations) : liteMenuTree(this.animations));
     if (!tree.length) return;
+    this.setTip(false); // 名字提示别盖住菜单
     this.menuOpen = true;
     this.updateRoom(); // 先放宽窗口，菜单的可显示范围（visibleClampRect）才算得上新余量
     this.setInteractive(true); // 菜单是窗口内 DOM：悬停期间整窗保持可交互，关闭后恢复命中区穿透
