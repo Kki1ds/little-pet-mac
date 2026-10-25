@@ -337,6 +337,38 @@ function attachRoleLog(win, pet) {
 
 /** win.id -> 上一次**请求**的内容区矩形（"x,y,w,h"）：pet:set-bounds 的去重基准，见那里的注释 */
 const lastRequestedBounds = new Map();
+/**
+ * macOS 本机轻量版：每次挪窗口都要 WindowServer 重新合成，拖拽/甩飞时渲染端每帧上报一次，
+ * 主进程和 WindowServer 会被拖满。这里把实际移动合并到每 MOVE_INTERVAL_MS 至多一次
+ * （总是落到最新位置），尺寸没变时用更轻的 setPosition。
+ */
+const MOVE_INTERVAL_MS = 25;
+const moveState = new Map(); // win.id → { at, w, h, pending, timer }
+function moveWindow(win, rect) {
+  let st = moveState.get(win.id);
+  if (!st) {
+    st = { at: 0, w: -1, h: -1, pending: null, timer: null };
+    moveState.set(win.id, st);
+    win.once('closed', () => { if (st.timer) clearTimeout(st.timer); moveState.delete(win.id); });
+  }
+  st.pending = rect;
+  if (st.timer) return;
+  const apply = () => {
+    st.timer = null;
+    const r = st.pending;
+    st.pending = null;
+    if (!r || win.isDestroyed()) return;
+    st.at = Date.now();
+    if (r.width === st.w && r.height === st.h) win.setPosition(r.x, r.y, false);
+    else win.setContentBounds(r, false);
+    st.w = r.width;
+    st.h = r.height;
+  };
+  const wait = MOVE_INTERVAL_MS - (Date.now() - st.at);
+  if (wait <= 0) apply();
+  else st.timer = setTimeout(apply, wait);
+}
+
 /** 每窗口渲染端上报的余量 { l, t, size }（窗口余量可变，命中区判定按它算，见 pointer-target.js） */
 const petMargins = new Map();
 
@@ -770,7 +802,7 @@ app.whenReady().then(() => {
     if ([marginL, marginT, spriteSize].every(Number.isFinite)) petMargins.set(win.id, { l: marginL, t: marginT, size: spriteSize });
     if (lastRequestedBounds.get(win.id) !== key) {
       lastRequestedBounds.set(win.id, key);
-      win.setContentBounds(rect, false);
+      moveWindow(win, rect);
     }
     // 碰撞站场：位置必须用**包围盒左上角**（renderer 显式上报 boxX/boxY）——
     // 窗口坐标 = 包围盒 − margin（半只宠物宽），直接拿窗口坐标会让跨窗检测整体错位
