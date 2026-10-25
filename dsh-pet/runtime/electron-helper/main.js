@@ -337,6 +337,8 @@ function attachRoleLog(win, pet) {
 
 /** win.id -> 上一次**请求**的内容区矩形（"x,y,w,h"）：pet:set-bounds 的去重基准，见那里的注释 */
 const lastRequestedBounds = new Map();
+/** 每窗口渲染端上报的余量 { l, t, size }（窗口余量可变，命中区判定按它算，见 pointer-target.js） */
+const petMargins = new Map();
 
 /**
  * 宠物间碰撞 broker 状态：petId -> { x, y, vx, vy, size, bottomPad }。
@@ -440,7 +442,7 @@ function petsFromEnv() {
 function petWindowSize(size) {
   const height = (size * 9) / 16;
   const bottomPad = (size * (9 / 16) * (360 - 330)) / 360;
-  const m = Math.round(size * 0.5);
+  const m = Math.round(size * 0.02); // = renderer 的 TIGHT_MARGIN_RATIO（平时的窄余量）
   return { width: Math.round(size) + m * 2, height: Math.round(height + bottomPad) + m * 2 };
 }
 
@@ -542,10 +544,11 @@ function createPetWindows() {
       const busy = inputBusy.get(win.id) === true;
       const point = screen.getCursorScreenPoint();
       // 余量区停留计时：只在"非 busy 且在余量区"时累加，离开余量区即清零；busy 期间不累加。
-      const zone = pointerZone(b, point);
+      const margin = petMargins.get(win.id);
+      const zone = pointerZone(b, point, margin);
       const nextMs = !busy && zone === 'margin' ? (offBodyMs.get(win.id) ?? 0) + POINTER_POLL_MS : 0;
       offBodyMs.set(win.id, nextMs);
-      const next = decideWindowIgnore(b, point, ignoring, busy, nextMs, inputRegions.get(win.id));
+      const next = decideWindowIgnore(b, point, ignoring, busy, nextMs, inputRegions.get(win.id), margin);
       if (next !== ignoring) setWindowIgnore(win, next);
     }, POINTER_POLL_MS);
     // [置顶看门狗] 建窗时那次 setAlwaysOnTop 之后再没人复查过：外部任何一次 z 序扰动都能让桌宠
@@ -573,6 +576,7 @@ function createPetWindows() {
       windows.delete(pet.id);
       if (!windows.size && taskbarOwner && !taskbarOwner.isDestroyed()) taskbarOwner.destroy();
       lastRequestedBounds.delete(win.id);
+      petMargins.delete(win.id);
       windowIgnore.delete(win.id);
       inputBusy.delete(win.id);
       inputRegions.delete(win.id);
@@ -760,6 +764,10 @@ app.whenReady().then(() => {
     // 读回值与设定值永远不相等，去重永远不生效，反而变成每帧强制重设窗口位置。
     const rect = { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
     const key = rect.x + ',' + rect.y + ',' + rect.width + ',' + rect.height;
+    const marginL = Number(bounds?.marginL);
+    const marginT = Number(bounds?.marginT);
+    const spriteSize = Number(bounds?.size);
+    if ([marginL, marginT, spriteSize].every(Number.isFinite)) petMargins.set(win.id, { l: marginL, t: marginT, size: spriteSize });
     if (lastRequestedBounds.get(win.id) !== key) {
       lastRequestedBounds.set(win.id, key);
       win.setContentBounds(rect, false);
@@ -828,7 +836,7 @@ app.whenReady().then(() => {
     // 渲染端的旧 menuOpen/chatOpen 守卫会请求整窗可交互；这里按真实光标和控件矩形裁定。
     const ignoring =
       interactive && input && inputBusy.get(win.id)
-        ? decideWindowIgnore(win.getContentBounds(), screen.getCursorScreenPoint(), false, true, 0, input)
+        ? decideWindowIgnore(win.getContentBounds(), screen.getCursorScreenPoint(), false, true, 0, input, petMargins.get(win.id))
         : !interactive;
     setWindowIgnore(win, ignoring);
   });

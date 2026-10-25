@@ -1,4 +1,5 @@
 (() => {
+  if (new URLSearchParams(location.search).has('lite')) return; // lightweight build: no API chat page
   const api = window.petClient;
   const nav = document.querySelector('nav'), home = document.querySelector('main');
   const section = document.createElement('main');

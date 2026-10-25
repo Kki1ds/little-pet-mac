@@ -8,7 +8,9 @@
 'use strict';
 
 // Keep legacy integrations archived and reversible without exposing their UI.
-const LEGACY_TOOLS_ENABLED = true;
+const LEGACY_TOOLS_ENABLED = false; // lightweight self-use build: no website / balance items
+// Lightweight self-use build: no 碎碎念 / chat (they need a model API).
+const CHAT_TOOLS_ENABLED = false;
 
 // 两个动作之间的待机时长：控制台可调（见 preload restSeconds），未设置时 20 秒；0 = 原版行为（动作接连播放）
 const DEFAULT_IDLE_REST_MS = 20000;
@@ -57,8 +59,10 @@ class PetSprite {
     window.__dshPetDebug.sideAllow = this.sideAllow;
     // 窗口四周外扩（= WINDOW_MARGIN_RATIO×宠物尺寸）：sprite 钉在 (margin.l, margin.t)，
     // 窗口 = sprite + 四边余量——气泡/未来弹窗显示在余量里；余量透明且点击穿透
-    const m = this.size * WINDOW_MARGIN_RATIO;
+    const m = this.size * TIGHT_MARGIN_RATIO;
     this.margin = { t: m, r: m, b: m, l: m };
+    this.roomy = false; // 右下是否已放宽（见 updateRoom）
+    this.roomTimer = null;
     window.__dshPetDebug.winMargin = this.margin;
     // 宠物包围盒左上角在【工作区】坐标系里的位置（本窗口的位置 = 宠物的位置）
     this.pos = { x: 0, y: 0 };
@@ -326,6 +330,8 @@ class PetSprite {
         fly ? toScreen(fly.vy) : 0,
         !!this.physics?.petCollision,
         !!fly,
+        toScreen(this.margin.l),
+        toScreen(this.margin.t),
       );
     }
     // 位置变了（宠物漫游/拖拽/飞行，窗口跟着动）：提示若正显示必须重摆一次——它跟的是光标，
@@ -1234,7 +1240,34 @@ class PetSprite {
     const next = !!on;
     if (next === this.tipOn) return;
     this.tipOn = next;
+    this.updateRoom();
     this.renderTip();
+  }
+
+  /**
+   * 菜单/悬浮提示/对话框需要地方显示：打开时把窗口右侧和下方放宽到 WINDOW_MARGIN_RATIO，
+   * 全部关掉后稍等再收回（光标在身体边缘进进出出时不来回改窗口尺寸）。左上不动，宠物不跳。
+   */
+  updateRoom() {
+    const need = this.menuOpen || this.tipOn || this.chatOpen;
+    if (this.roomTimer !== null) {
+      window.clearTimeout(this.roomTimer);
+      this.roomTimer = null;
+    }
+    if (need) this.setRoomy(true);
+    else if (this.roomy) this.roomTimer = window.setTimeout(() => {
+      this.roomTimer = null;
+      this.setRoomy(false);
+    }, 600);
+  }
+
+  setRoomy(roomy) {
+    if (roomy === this.roomy) return;
+    this.roomy = roomy;
+    const m = this.size * (roomy ? WINDOW_MARGIN_RATIO : TIGHT_MARGIN_RATIO);
+    this.margin.r = m;
+    this.margin.b = m;
+    this.sendBounds(this.pos.x, this.pos.y);
   }
 
   /**
@@ -1373,9 +1406,8 @@ class PetSprite {
       ? [{ label: OPEN_TARGET === 'desktop' ? '打开 DeepSeek Harness' : '打开网站', action: 'open-site' }]
       : [];
     if (LEGACY_TOOLS_ENABLED && this.pet.balanceEnabled) tools.push({ label: '查看余额', action: 'show-balance' });
+    if (CHAT_TOOLS_ENABLED) tools.push({ label: '碎碎念', action: 'whisper' }, { label: '对话', action: 'chat' });
     tools.push(
-      { label: '碎碎念', action: 'whisper' },
-      { label: '对话', action: 'chat' },
       { label: '回到初始位置', action: 'home' },
       // 显示位置（仅网页/仅桌面/两者/都不）：改这只宠物的 display 配置 + 宿主重载生效。
       // 与浏览器端注入的是**同一份**子菜单（shared 的 displayMenuBranch），两端文案/取值不会漂移。
@@ -1389,6 +1421,7 @@ class PetSprite {
     const tree = tools.concat(S.buildMenuTree(this.animations));
     if (!tree.length) return;
     this.menuOpen = true;
+    this.updateRoom(); // 先放宽窗口，菜单的可显示范围（visibleClampRect）才算得上新余量
     this.setInteractive(true); // 菜单是窗口内 DOM：悬停期间整窗保持可交互，关闭后恢复命中区穿透
     this.syncInputBusy();
     window.__dshPetDebug.menuOpen = true;
@@ -1402,6 +1435,7 @@ class PetSprite {
       // 菜单被点外/Esc 关闭（非菜单项路径）：同样复位可交互标记，恢复命中区判定
       onClose: () => {
         this.menuOpen = false;
+        this.updateRoom();
         window.__dshPetDebug.menuOpen = false;
         this.syncInputBusy();
         if (!this.inputBusy()) this.setInteractive(false);
@@ -1462,6 +1496,7 @@ class PetSprite {
       this.menuClose = null;
     }
     this.menuOpen = false;
+    this.updateRoom();
     window.__dshPetDebug.menuOpen = false;
     this.syncInputBusy(); // 菜单关：若没有别的占用（拖拽/弹窗）则交还常规判定
     if (!this.inputBusy()) this.setInteractive(false);
@@ -1523,6 +1558,7 @@ class PetSprite {
       onClose: () => {
         this.chatClose = null;
         this.chatOpen = false;
+        this.updateRoom();
         window.__dshPetDebug.chatOpen = false;
         this.syncInputBusy(); // 弹窗关：交还常规判定（菜单还开着的话仍保持忙，见 inputBusy）
         if (!this.menuOpen) this.setInteractive(false); // 弹窗关了且无菜单：恢复命中区穿透
@@ -1530,6 +1566,7 @@ class PetSprite {
     });
     this.chatClose = m.close;
     this.chatOpen = true; // 穿透守卫：弹窗期间整窗保持可交互，光标移到输入框不被翻回穿透
+    this.updateRoom();
     window.__dshPetDebug.chatOpen = true;
     this.syncInputBusy();
     this.setInteractive(true);

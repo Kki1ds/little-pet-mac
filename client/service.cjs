@@ -68,6 +68,8 @@ async function ensureServer() {
   const env={...process.env,...chatBridgeEnvironment,DSH_HOME:HOME,LOCALAPPDATA:HOME};delete env.ELECTRON_RUN_AS_NODE;if(packaged)env.DSH_PET_ELECTRON_PATH=process.execPath;
   // macOS has no bundled node.exe: Electron's own Node runs the host; the engine strips ELECTRON_RUN_AS_NODE again before spawning pet helpers.
   if(process.platform!=='win32'){env.ELECTRON_RUN_AS_NODE='1';env.DSH_PET_ELECTRON_PATH=process.execPath;env.DSH_PET_HOST_KIND='client';}
+  // Lightweight self-use build: the host skips balance polling and 碎碎念 (no outbound network).
+  env.DSH_PET_LITE='1';
   const child=spawn(process.platform!=='win32' ? process.execPath : packaged ? path.resolve(__dirname,'../../../runtimes/node.exe') : path.join(process.env.ProgramFiles,'nodejs/node.exe'),[path.join(PACKAGE,'lib/standalone.js'),'--port','3081'],{cwd:PACKAGE,env,detached:true,windowsHide:true,stdio:['ignore',out,err]});
   let spawnError;child.on('error',e=>spawnError=e);child.unref();fs.closeSync(out);fs.closeSync(err);
   for(let i=0;i<40;i++){await new Promise(r=>setTimeout(r,250));if(spawnError)throw spawnError;try{const h=await request('/health');if(path.resolve(h.plugin.root)===PACKAGE)return;throw Error('启动了不匹配的服务');}catch(e){if(!['ECONNREFUSED','ECONNRESET'].includes(e.code))throw e;}}
