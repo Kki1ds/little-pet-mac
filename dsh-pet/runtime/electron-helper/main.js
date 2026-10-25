@@ -359,11 +359,16 @@ function moveWindow(win, rect) {
     st.pending = null;
     if (!r || win.isDestroyed()) return;
     st.at = Date.now();
-    // `| 0`: Math.round can give -0, which Electron refuses as an integer argument.
-    if (r.width === st.w && r.height === st.h) win.setPosition(r.x | 0, r.y | 0, false);
-    else win.setContentBounds(r, false);
-    st.w = r.width;
-    st.h = r.height;
+    try {
+      // `| 0`: Math.round can give -0, which Electron refuses as an integer argument.
+      if (r.width === st.w && r.height === st.h) win.setPosition(r.x | 0, r.y | 0, false);
+      else win.setContentBounds(r, false);
+      st.w = r.width;
+      st.h = r.height;
+    } catch (e) {
+      // A timer callback has no caller: an uncaught error here pops a dialog mid-drag.
+      console.error('[dsh-pet-desktop-helper] move failed:', e && e.message ? e.message : e);
+    }
   };
   const wait = MOVE_INTERVAL_MS - (Date.now() - st.at);
   if (wait <= 0) apply();
