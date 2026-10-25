@@ -16,9 +16,11 @@ python3 tools/macos/build_macos.py
 
 - 数据目录：`~/.dsh/dsh-pet/characters`，客户端设置和日志在 `~/.dsh/pet-control-client`。
 - 宿主服务由 Electron 自带的 Node 运行（`ELECTRON_RUN_AS_NODE`），不附带 `node.exe`；引擎下载 Electron 用的两个依赖换成了空实现，打包后的应用不会下载 Electron。
-- 每个角色是一个独立的 Helper 进程，已从 Dock 隐藏；Dock 里只保留控制台一个图标。
-- 应用菜单提供编辑快捷键（Cmd+C/V/A）；Cmd+Q 和 Dock 的「退出」都会关闭全部桌宠；点 Dock 图标重新打开控制台。
-- 菜单栏图标使用 `client/assets/app.png`。
+- 默认只在菜单栏显示（Info.plist 设 `LSUIElement`），Dock 里没有图标。点菜单栏图标可打开控制台、全部开启/隐藏或退出。
+- 控制台「在 Dock 栏显示图标」开关（或菜单栏菜单里的同名勾选项）可以把 Dock 图标加回来，设置存在 `~/.dsh/pet-control-client/mac-settings.json`，立即生效。
+- 每个角色是一个独立的 Helper 进程，始终不在 Dock 显示。
+- 应用菜单提供编辑快捷键（Cmd+C/V/A）；控制台在前台时 Cmd+Q 关闭全部桌宠；开启 Dock 图标时点它也能重新打开控制台。
+- 菜单栏图标是模板图 `client/assets/trayTemplate.png`（+ `@2x`），系统按浅色/深色菜单栏自动着色；由 `tools/macos/tray-icon/make_tray_icon.py` 生成。
 - AI 密钥用 Electron safeStorage 保存，在 macOS 上由钥匙串加密，首次保存可能弹出钥匙串授权。
 - `client/verify.cjs`（PowerShell 窗口检查）只适用于 Windows，未打包进 macOS 版。
 

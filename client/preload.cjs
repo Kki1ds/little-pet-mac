@@ -19,5 +19,9 @@ contextBridge.exposeInMainWorld('petClient', Object.freeze({
   hideAll: () => ipcRenderer.invoke('characters:hide-all'),
   showAll: () => ipcRenderer.invoke('characters:show-all'),
   quit: () => ipcRenderer.invoke('client:quit'),
+  platform: process.platform,
+  showDock: () => ipcRenderer.invoke('settings:dock-get'),
+  setShowDock: (value) => ipcRenderer.invoke('settings:dock-set', value),
+  onDockChanged: (callback) => {const listener=(_event,value)=>callback(value);ipcRenderer.on('settings:dock-changed',listener);return ()=>ipcRenderer.removeListener('settings:dock-changed',listener);},
   onChanged: (callback) => {const listener=(_event,roles)=>callback(roles);ipcRenderer.on('characters:changed',listener);return ()=>ipcRenderer.removeListener('characters:changed',listener);},
 }));
