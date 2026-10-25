@@ -77,12 +77,13 @@ func encode() throws {
         AVVideoWidthKey: width,
         AVVideoHeightKey: height,
         AVVideoCompressionPropertiesKey: compression,
-        // Chromium shows the untagged webm clips with the BT.601 matrix; tag the .mov the same
-        // way so both look alike (BT.709 came out visibly lighter on the Mac).
+        // The encoder always converts to YUV with BT.709, so the matrix tag must say 709
+        // (a 601 tag turned everything blue). Transfer sRGB matches how Chromium shows the
+        // untagged webm clips (a 709 transfer tag looked too bright). Measured on the Mac.
         AVVideoColorPropertiesKey: [
             AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
-            AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
-            AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_601_4,
+            AVVideoTransferFunctionKey: "IEC_sRGB",
+            AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
         ],
     ]
     guard writer.canApply(outputSettings: settings, forMediaType: .video) else {

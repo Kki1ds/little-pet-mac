@@ -342,7 +342,7 @@ const lastRequestedBounds = new Map();
  * 主进程和 WindowServer 会被拖满。这里把实际移动合并到每 MOVE_INTERVAL_MS 至多一次
  * （总是落到最新位置），尺寸没变时用更轻的 setPosition。
  */
-const MOVE_INTERVAL_MS = 25;
+const MOVE_INTERVAL_MS = 16; // 25 ms (40/s) was visibly choppy on a 120 Hz screen
 const moveState = new Map(); // win.id → { at, w, h, pending, timer }
 function moveWindow(win, rect) {
   let st = moveState.get(win.id);

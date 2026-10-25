@@ -85,6 +85,8 @@ async function list() {
   for(const [entry,cfg] of Object.entries(config))for(const pet of cfg.pets||[]){
     const preview=cfg.animations.idle[0];let file=path.join(projectDir(entry),'animations',preview+'.webm');
     if(entry==='main'&&!fs.existsSync(file)&&!fs.existsSync(path.join(projectDir(entry),'animations')))file=path.join(PACKAGE,'assets/webm',preview+'.webm');
+    // macOS: console previews play the hardware-decoded .mov when the build added one.
+    const mov=file.slice(0,-5)+'.mov';if(process.platform==='darwin'&&fs.existsSync(mov))file=mov;
     let poster='';const posterFile=path.join(__dirname,'assets',entry+'.png');if(fs.existsSync(posterFile))poster='data:image/png;base64,'+fs.readFileSync(posterFile).toString('base64');
     roles.push({cloneCount:Math.max(0,cfg.pets.length-1),cloneLimit:8,isClone:pet.id!==cfg.pets[0].id&&/__clone_[1-8]$/.test(pet.id),id:pet.id,entry,name:pet.name||pet.id,visible:['desktop','both'].includes(pet.display),size:pet.size,actions:animationNames(cfg.animations),idle:preview,poster,project:entry==='main'&&!fs.existsSync(projectDir(entry))?path.join(HOME,'dsh-pet'):projectDir(entry),preview:fs.existsSync(file)?require('node:url').pathToFileURL(file).href:''});
   }
