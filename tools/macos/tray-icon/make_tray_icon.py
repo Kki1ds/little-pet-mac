@@ -2,6 +2,7 @@
 
 A template image: black + alpha only, macOS tints it for light and dark menu bars.
 小克 bust silhouette: long hair, face cut out under the bangs, sunflower hair ornament.
+Eyes and a smile sit in the face so it doesn't read as a blank mask.
 Shapes are drawn on a 36x36 grid (18pt @2x), rendered at 8x and box-downsampled.
 
     pip install cairosvg pillow numpy
@@ -33,6 +34,9 @@ NEG=f'''
 <path d="M12.6,27.4 L11.2,27.4 L9.4,35.6 L10.6,35.6 Z M21.0,27.4 L22.4,27.4 L24.6,35.6 L23.0,35.6 Z"/>
 <circle cx="{FX}" cy="{FY}" r="5.4"/>'''
 TOP=f'<path d="{petals(FX,FY,1.2,4.4,9,0.36)}"/><circle cx="{FX}" cy="{FY}" r="1.9"/>'
+# Face details on top of the cut-out: two eyes and a small smile.
+TOP+='<ellipse cx="13.7" cy="20.7" rx="1.25" ry="1.6"/><ellipse cx="19.9" cy="20.7" rx="1.25" ry="1.6"/>'
+TOP+='<path d="M15.6,23.0 Q16.8,24.0 18.0,23.0" fill="none" stroke="black" stroke-width="0.9" stroke-linecap="round"/>'
 def render(body,px):
     doc=f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36">{body}</svg>'
     im=Image.open(io.BytesIO(cairosvg.svg2png(bytestring=doc.encode(),output_width=px,output_height=px))).convert('RGBA')
