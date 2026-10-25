@@ -96,6 +96,9 @@ async function importProject(folder) {
   catch(e){fs.rmSync(temp,{recursive:true,force:true});throw e;}
   return list();
 }
+const rhythmFile=path.join(HOME,'pet-control-client','pet-rhythm.json');
+function restSeconds(){try{const v=JSON.parse(fs.readFileSync(rhythmFile,'utf8')).restSeconds;if(Number.isFinite(v)&&v>=0)return v;}catch{}return 20;}
+function setRestSeconds(value){if(!Number.isInteger(value)||value<0||value>600)throw Error('动作间隔请填写 0–600 的整数秒');fs.mkdirSync(path.dirname(rhythmFile),{recursive:true});const temp=rhythmFile+'.tmp';fs.writeFileSync(temp,JSON.stringify({restSeconds:value}));fs.renameSync(temp,rhythmFile);return value;}
 function clone(id,remove=false){const operation=writes.then(async()=>{await find(id);await request(base+(remove?'/pet-clone-remove':'/pet-clone'),'POST',{id});return list();});writes=operation.catch(()=>{});return operation;}
 function resize(id,size){const operation=writes.then(async()=>{await find(id);await request(base+'/pet-size','POST',{id,size});return list();});writes=operation.catch(()=>{});return operation;}
-module.exports={PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};
+module.exports={restSeconds,setRestSeconds,PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};

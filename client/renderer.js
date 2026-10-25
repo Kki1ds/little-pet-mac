@@ -15,7 +15,7 @@ function sizeControl(role){
  box.append(label,range,number,apply,reset);return box;
 }
 function render(){
- container.replaceChildren();document.querySelectorAll('header button,.toolbar button,footer button').forEach(b=>b.disabled=busy);
+ container.replaceChildren();document.querySelectorAll('header button,.toolbar button,footer button,.rhythm button,.rhythm input').forEach(b=>b.disabled=busy);
  const originals=roles.filter(r=>!r.isClone),clones=roles.filter(r=>r.isClone);
  document.querySelector('#summary').textContent=`${originals.length} 位角色 · ${clones.length} 个分身 · ${roles.filter(r=>r.visible).length} 个实例正在桌面陪伴`;
  for(const role of originals){
@@ -58,6 +58,9 @@ document.querySelector('#refresh').onclick=()=>run(async()=>{roles=await api.lis
 document.querySelector('#hide-all').onclick=()=>run(async()=>{roles=await api.hideAll();},'所有角色已隐藏');
 document.querySelector('#show-all').onclick=()=>run(async()=>{roles=await api.showAll();},'所有角色已开启');
 document.querySelector('#import').onclick=()=>run(async()=>{const result=await api.import();if(result){roles=result;message('角色已导入，可开启桌面显示');}});
+const restInput=document.querySelector('#rest-seconds');
+document.querySelector('#rest-apply').onclick=()=>{if(!restInput.reportValidity()||restInput.value==='')return;run(async()=>{restInput.value=String(await api.setRestSeconds(Number(restInput.value)));},'动作间隔已更新，下一个动作起生效');};
+api.restSeconds().then(v=>{restInput.value=String(v);}).catch(()=>{});
 document.querySelector('#quit').onclick=()=>run(()=>api.quit());
 // Transparent VP9 previews decode in software; only play them while the console is in front.
 function previewsActive(){return !document.hidden&&document.hasFocus();}

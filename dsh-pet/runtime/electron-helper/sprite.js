@@ -10,8 +10,12 @@
 // Keep legacy integrations archived and reversible without exposing their UI.
 const LEGACY_TOOLS_ENABLED = true;
 
-// 两个动作之间的待机时长（毫秒）；0 = 原版行为（动作接连播放）
-const IDLE_REST_MS = 20000;
+// 两个动作之间的待机时长：控制台可调（见 preload restSeconds），未设置时 20 秒；0 = 原版行为（动作接连播放）
+const DEFAULT_IDLE_REST_MS = 20000;
+function idleRestMs() {
+  const seconds = window.petBridge?.restSeconds?.();
+  return typeof seconds === 'number' ? seconds * 1000 : DEFAULT_IDLE_REST_MS;
+}
 const POS_KEY_PREFIX = 'dsh-pet-position:';
 function readSavedPos(id) {
   try {
@@ -583,12 +587,16 @@ class PetSprite {
   }
 
   /**
-   * 动作之间先待机休息 IDLE_REST_MS，再播下一个动作（自用版：原版动作一个接一个，太频繁）。
+   * 动作之间先待机休息 idleRestMs()，再播下一个动作（自用版：原版动作一个接一个，太频繁）。
    * 返回 true = 本次已改为播待机，调用方不再选动作。
    */
   restBeforeNextAction() {
     const idle = this.animations.idle[0];
-    if (!idle || IDLE_REST_MS <= 0 || this.workOn) return false;
+    const restMs = idleRestMs();
+    if (!idle || restMs <= 0 || this.workOn) {
+      this.restUntil = 0;
+      return false;
+    }
     if (this.restUntil && Date.now() < this.restUntil) {
       this.armRestTimer(this.restUntil - Date.now());
       this.playOnce(idle);
@@ -600,8 +608,8 @@ class PetSprite {
     }
     if (this.anim === idle) return false;
     this.restFrom = this.anim;
-    this.restUntil = Date.now() + IDLE_REST_MS;
-    this.armRestTimer(IDLE_REST_MS);
+    this.restUntil = Date.now() + restMs;
+    this.armRestTimer(restMs);
     this.playOnce(idle);
     return true;
   }

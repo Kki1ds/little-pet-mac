@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('petClient', Object.freeze({
   removeClone: id => ipcRenderer.invoke('characters:remove-clone',id),
   resize: (id,size) => ipcRenderer.invoke('characters:resize',id,size),
   list: () => ipcRenderer.invoke('characters:list'),
+  restSeconds: () => ipcRenderer.invoke('rhythm:get'),
+  setRestSeconds: (value) => ipcRenderer.invoke('rhythm:set', value),
   toggle: (id, visible) => ipcRenderer.invoke('characters:toggle', id, visible),
   play: (id, name) => ipcRenderer.invoke('characters:play', id, name),
   folder: (id) => ipcRenderer.invoke('characters:folder', id),

@@ -18,8 +18,22 @@
 //       reportCollide：本窗飞行方检测到撞到 targetId → 主进程把动量结果转发给目标窗；
 //       onPetHit：订阅「你被撞了」→ 用新初速 startThrow 抛出去（与浏览器 onHit 同语义）。
 const { contextBridge, ipcRenderer } = require('electron');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+// 动作间隔（秒）由小小桌宠控制台写入；每次进入待机时现读，改完无需重启宠物。
+const RHYTHM_FILE = path.join(process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), 'pet-control-client', 'pet-rhythm.json');
 
 contextBridge.exposeInMainWorld('petBridge', {
+  restSeconds() {
+    try {
+      const value = JSON.parse(fs.readFileSync(RHYTHM_FILE, 'utf8')).restSeconds;
+      return Number.isFinite(value) && value >= 0 ? value : null;
+    } catch {
+      return null;
+    }
+  },
   recordRuntime(event, details) {
     ipcRenderer.send('pet:runtime-log', { event, details });
   },
