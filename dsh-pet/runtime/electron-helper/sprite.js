@@ -439,6 +439,15 @@ class PetSprite {
     });
   }
 
+  // macOS: HEVC-alpha .mov is decoded in hardware, VP9-alpha .webm in software.
+  // Prefer the .mov and fall back to the .webm for clips that have none.
+  animExt(name) {
+    if (!this.movMissing) this.movMissing = new Set();
+    const preferMov = /Mac/.test(navigator.platform) && S.ANIMATION_EXT !== '.mov';
+    if (!preferMov) return S.ANIMATION_EXT || '.webm';
+    return this.movMissing.has(name) ? '.webm' : '.mov';
+  }
+
   switchTo(next, nextOnce) {
     if (!next) return;
     const pending = this.pending;
@@ -460,7 +469,8 @@ class PetSprite {
     // A refreshed fox window must not reuse an hour-old cached replacement clip.
     // Keep a stable revision within the window so ordinary playback still caches.
     const assetRevision = '?v=' + (this.assetRevision ??= Date.now());
-    el.src = this.assetBase + encodeURIComponent(next) + (S.ANIMATION_EXT || '.webm') + assetRevision;
+    const ext = this.animExt(next);
+    el.src = this.assetBase + encodeURIComponent(next) + ext + assetRevision;
     el.loop = !nextOnce;
     el.muted = true;
     el.autoplay = true;
@@ -479,6 +489,13 @@ class PetSprite {
     const loadTimer = window.setTimeout(() => loadGuard('10s 超时'), 10000);
     el.onerror = () => {
       window.clearTimeout(loadTimer);
+      if (ext === '.mov') {
+        // No .mov for this clip (or it failed to decode): play the .webm instead.
+        this.movMissing.add(next);
+        if (this.pending && this.pending.gen === gen) this.pending = null;
+        this.switchTo(next, nextOnce);
+        return;
+      }
       loadGuard('video error');
     };
     el.load();
@@ -530,7 +547,7 @@ class PetSprite {
     this.anim = name;
     this.once = !continuousIdle;
     const front = this.front === 0 ? this.videoA : this.videoB;
-    const url = this.assetBase + encodeURIComponent(name) + (S.ANIMATION_EXT || '.webm');
+    const url = this.assetBase + encodeURIComponent(name) + this.animExt(name);
     if (continuousIdle && front && front.loop && front.readyState >= 2 && front.getAttribute('src') === url) {
       if (this.pendingSquash) {
         this.pendingSquash = false;

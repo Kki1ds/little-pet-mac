@@ -62,6 +62,8 @@ func encode() throws {
     try? FileManager.default.removeItem(at: outputURL)
 
     let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+    // moov atom first: the pet host serves files without Range support.
+    writer.shouldOptimizeForNetworkUse = true
     let compression: [String: Any] = [
         AVVideoQualityKey: 0.75,
         kVTCompressionPropertyKey_TargetQualityForAlpha as String: 0.75,

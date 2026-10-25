@@ -11,6 +11,16 @@ const HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
 const ROOT = path.join(HOME, 'dsh-pet/characters');
 let chatBridgeEnvironment = null;
 function setChatBridge(environment) {chatBridgeEnvironment = environment;}
+// Characters are seeded once, so .mov clips added by a later build are copied into
+// existing character folders here. Only missing .mov files are added; nothing is overwritten.
+function syncMov(src,dest) {
+  if(!fs.existsSync(src)||!fs.existsSync(dest))return;
+  for(const name of fs.readdirSync(src)){
+    if(!name.endsWith('.mov'))continue;
+    const target=path.join(dest,name);
+    if(!fs.existsSync(target)&&fs.existsSync(path.join(dest,name.slice(0,-4)+'.webm')))fs.copyFileSync(path.join(src,name),target);
+  }
+}
 function seedCharacters() {
   const seedRoot=path.resolve(__dirname,'../../characters');
   if(!packaged||!fs.existsSync(seedRoot))return;
@@ -18,7 +28,7 @@ function seedCharacters() {
   for(const entry of fs.readdirSync(seedRoot,{withFileTypes:true})){
     if(!entry.isDirectory()||!/^[a-zA-Z0-9_-]+$/.test(entry.name))continue;
     const dest=projectDir(entry.name);
-    if(fs.existsSync(dest))continue;
+    if(fs.existsSync(dest)){syncMov(path.join(seedRoot,entry.name,'animations'),path.join(dest,'animations'));continue;}
     if(entry.name==='main'&&['main-config.jsonc','main-config.json'].some(n=>fs.existsSync(path.join(HOME,'dsh-pet',n))))continue;
     if(fs.existsSync(path.join(HOME,'dsh-pet/pet',entry.name+'-config.json')))continue;
     fs.cpSync(path.join(seedRoot,entry.name),dest,{recursive:true,errorOnExist:true,force:false});

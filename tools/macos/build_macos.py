@@ -121,6 +121,19 @@ def write_stub(base, name, source):
     (pkg / 'index.js').write_text(source, 'utf-8')
 
 
+def add_mov_clips(characters, cache):
+    """Encode every character's .webm to HEVC-alpha .mov (cached between builds) and add them to the app."""
+    if not shutil.which('ffmpeg') and not Path('/opt/homebrew/bin/ffmpeg').exists():
+        print('ffmpeg not found: building without .mov clips (brew install ffmpeg to add them)', flush=True)
+        return
+    for char in sorted(p for p in (ROOT / 'characters').iterdir() if (p / 'animations').is_dir()):
+        out = cache / char.name
+        run(sys.executable, ROOT / 'tools/macos/hevc/encode_mov.py', char / 'animations', '--out-dir', out)
+        for mov in out.glob('*.mov'):
+            if (char / 'animations' / (mov.stem + '.webm')).exists():
+                shutil.copy2(mov, characters / char.name / 'animations' / mov.name)
+
+
 def main():
     if sys.platform != 'darwin':
         raise SystemExit('build_macos.py only runs on macOS')
@@ -132,6 +145,7 @@ def main():
     parser.add_argument('--output', type=Path, help='new folder to create (default outputs/macos/<timestamp>)')
     parser.add_argument('--sign', default='-', metavar='IDENTITY', help='codesign identity, e.g. "Developer ID Application: Name (TEAMID)"; default ad-hoc')
     parser.add_argument('--dmg', action='store_true', help='also pack a .dmg next to the app')
+    parser.add_argument('--no-mov', action='store_true', help='skip the HEVC-alpha .mov clips (the pets then decode .webm in software)')
     parser.add_argument('--notarize', metavar='PROFILE', help='notarize and staple the .dmg with this notarytool keychain profile (needs --sign and --dmg)')
     args = parser.parse_args()
     if args.notarize and (args.sign == '-' or not args.dmg):
@@ -181,6 +195,8 @@ def main():
     write_stub(engine, '@electron/get', "export async function downloadArtifact(){throw new Error('小小桌宠 macOS 版不下载 Electron');}\n")
     write_stub(engine, '@electron-internal/extract-zip', "export default async function extract(){throw new Error('小小桌宠 macOS 版不解压 Electron');}\n")
     shutil.copytree(ROOT / 'characters', res / 'characters')
+    if not args.no_mov:
+        add_mov_clips(res / 'characters', cache / 'mov')
 
     sign(app, args.sign, out)
     run('codesign', '--verify', '--deep', '--strict', app)
