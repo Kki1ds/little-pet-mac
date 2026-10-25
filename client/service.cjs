@@ -1,12 +1,13 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
+const os = require('node:os');
 const { spawn } = require('node:child_process');
 const bundled = path.resolve(__dirname, '../../engine');
 const packaged = fs.existsSync(path.join(bundled, 'lib/standalone.js'));
 const sourcePackage = fs.existsSync(path.resolve(__dirname, '../dsh-pet/package.json')) ? '../dsh-pet' : '../dsh-pet/dsh-pet';
 const PACKAGE = packaged ? bundled : path.resolve(__dirname, sourcePackage);
-const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE, '.dsh');
+const HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
 const ROOT = path.join(HOME, 'dsh-pet/characters');
 let chatBridgeEnvironment = null;
 function setChatBridge(environment) {chatBridgeEnvironment = environment;}
@@ -53,7 +54,9 @@ async function ensureServer() {
   const logDir=path.join(HOME,'pet-control-client/logs');fs.mkdirSync(logDir,{recursive:true});
   const out=fs.openSync(path.join(logDir,'server.stdout.log'),'a'),err=fs.openSync(path.join(logDir,'server.stderr.log'),'a');
   const env={...process.env,...chatBridgeEnvironment,DSH_HOME:HOME,LOCALAPPDATA:HOME};delete env.ELECTRON_RUN_AS_NODE;if(packaged)env.DSH_PET_ELECTRON_PATH=process.execPath;
-  const child=spawn(packaged ? path.resolve(__dirname,'../../../runtimes/node.exe') : path.join(process.env.ProgramFiles,'nodejs/node.exe'),[path.join(PACKAGE,'lib/standalone.js'),'--port','3081'],{cwd:PACKAGE,env,detached:true,windowsHide:true,stdio:['ignore',out,err]});
+  // macOS has no bundled node.exe: Electron's own Node runs the host; the engine strips ELECTRON_RUN_AS_NODE again before spawning pet helpers.
+  if(process.platform!=='win32'){env.ELECTRON_RUN_AS_NODE='1';env.DSH_PET_ELECTRON_PATH=process.execPath;env.DSH_PET_HOST_KIND='client';}
+  const child=spawn(process.platform!=='win32' ? process.execPath : packaged ? path.resolve(__dirname,'../../../runtimes/node.exe') : path.join(process.env.ProgramFiles,'nodejs/node.exe'),[path.join(PACKAGE,'lib/standalone.js'),'--port','3081'],{cwd:PACKAGE,env,detached:true,windowsHide:true,stdio:['ignore',out,err]});
   let spawnError;child.on('error',e=>spawnError=e);child.unref();fs.closeSync(out);fs.closeSync(err);
   for(let i=0;i<40;i++){await new Promise(r=>setTimeout(r,250));if(spawnError)throw spawnError;try{const h=await request('/health');if(path.resolve(h.plugin.root)===PACKAGE)return;throw Error('启动了不匹配的服务');}catch(e){if(!['ECONNREFUSED','ECONNRESET'].includes(e.code))throw e;}}
   throw Error('桌宠服务未能启动，请重试或查看客户端日志');
@@ -93,6 +96,9 @@ async function importProject(folder) {
   catch(e){fs.rmSync(temp,{recursive:true,force:true});throw e;}
   return list();
 }
+const rhythmFile=path.join(HOME,'pet-control-client','pet-rhythm.json');
+function restSeconds(){try{const v=JSON.parse(fs.readFileSync(rhythmFile,'utf8')).restSeconds;if(Number.isFinite(v)&&v>=0)return v;}catch{}return 20;}
+function setRestSeconds(value){if(!Number.isInteger(value)||value<0||value>600)throw Error('动作间隔请填写 0–600 的整数秒');fs.mkdirSync(path.dirname(rhythmFile),{recursive:true});const temp=rhythmFile+'.tmp';fs.writeFileSync(temp,JSON.stringify({restSeconds:value}));fs.renameSync(temp,rhythmFile);return value;}
 function clone(id,remove=false){const operation=writes.then(async()=>{await find(id);await request(base+(remove?'/pet-clone-remove':'/pet-clone'),'POST',{id});return list();});writes=operation.catch(()=>{});return operation;}
 function resize(id,size){const operation=writes.then(async()=>{await find(id);await request(base+'/pet-size','POST',{id,size});return list();});writes=operation.catch(()=>{});return operation;}
-module.exports={PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};
+module.exports={restSeconds,setRestSeconds,PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};

@@ -2452,7 +2452,8 @@ const ROUTE_PREFIX = "/dsh-pet-7340";
 * 该字段照样在；而 `dsh web` / 独立模式都是纯 Node 进程，取不到它。据此把「打开网站」自动分派：
 * 桌面宿主 → 唤起桌面应用窗口（helper 走 `dsh://open`），其余 → 浏览器打开站点。
 */
-const isDesktopHost = () => Boolean(process.versions.electron);
+// 小小桌宠 macOS 客户端也用 Electron 自带的 Node 跑宿主，但它不是 DSH 桌面应用，没有 dsh:// 协议。
+const isDesktopHost = () => Boolean(process.versions.electron) && process.env.DSH_PET_HOST_KIND !== "client";
 /** 不同扩展名对应的 Content-Type 映射 */
 const MIME = {
 	".webm": "video/webm",

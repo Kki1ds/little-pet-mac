@@ -1,6 +1,8 @@
 const {app,BrowserWindow,ipcMain,Tray,Menu,nativeImage,dialog,shell,safeStorage}=require('electron');
 const path=require('node:path'),fs=require('node:fs');
 const service=require('./service.cjs');
+const mac=process.platform==='darwin';
+const appIcon=path.join(__dirname,mac?'assets/app.png':'assets/app.ico');
 app.setName('小小桌宠');fs.mkdirSync(path.join(service.HOME,'pet-control-client'),{recursive:true});app.setPath('userData',path.join(service.HOME,'pet-control-client'));
 app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
 let window,tray,quitting=false;
@@ -13,15 +15,17 @@ if(!app.requestSingleInstanceLock()){app.quit();}else if(process.argv.includes('
   try{await service.ensureServer();}catch(e){dialog.showErrorBox('桌宠启动失败',e.message);app.quit();return;}
   try{const {startRoleAudit}=require(path.join(service.PACKAGE,'runtime/electron-helper/role-log.js'));const stopAudit=startRoleAudit({root:service.ROOT});app.once('before-quit',stopAudit);}catch(e){console.error('[pet-log] audit start failed:',e.message);}
   try{const broker=require(path.join(service.PACKAGE,'runtime/electron-helper/collision-link.cjs')).startBroker();broker.ready.catch(e=>console.error('[collision]',e.message));app.once('before-quit',()=>{void broker.close();});}catch(e){console.error('[collision] start failed:',e.message);}
-  window=new BrowserWindow({width:1100,height:780,minWidth:800,minHeight:620,title:'小小桌宠',backgroundColor:'#faf8f4',autoHideMenuBar:true,show:false,icon:path.join(__dirname,'assets/app.ico'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
-  window.setMenu(null);window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  window=new BrowserWindow({width:1100,height:780,minWidth:800,minHeight:620,title:'小小桌宠',backgroundColor:'#faf8f4',autoHideMenuBar:true,show:false,icon:appIcon,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+  window.setMenu(null);
+  // macOS keeps one app-wide menu; without Edit roles, Cmd+C/V/A stop working in text fields.
+  if(mac)Menu.setApplicationMenu(Menu.buildFromTemplate([{role:'appMenu',submenu:[{role:'about'},{type:'separator'},{role:'hide'},{role:'hideOthers'},{role:'unhide'},{type:'separator'},{label:'退出全部桌宠',accelerator:'Command+Q',click:()=>quitAll()}]},{role:'editMenu'},{role:'windowMenu'}]));window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   // Installer/uninstaller requests a normal shutdown before replacing program files.
   if(process.platform==='win32')window.hookWindowMessage(0x8042,()=>{void quitAll();});
   window.webContents.on('will-navigate',event=>event.preventDefault());
   window.on('close',event=>{if(!quitting){event.preventDefault();window.hide();}});
   window.on('show',()=>service.list().then(publishRoles).catch(()=>{}));
   window.once('ready-to-show',()=>window.show());
-  const image=nativeImage.createFromPath(path.join(__dirname,'assets/app.ico')).resize({width:24,height:24});
+  const image=nativeImage.createFromPath(appIcon).resize(mac?{width:18,height:18}:{width:24,height:24});
   tray=new Tray(image);tray.setToolTip('小小桌宠 · 宠物在后台陪伴');
   const show=()=>{window.show();window.focus();};
   tray.on('click',show);tray.on('double-click',show);
@@ -33,6 +37,8 @@ if(!app.requestSingleInstanceLock()){app.quit();}else if(process.argv.includes('
   handle('ai:history',id=>ai.history(id));
   handle('ai:send',(id,text)=>ai.send(id,text));
   handle('characters:list',()=>service.list());
+  handle('rhythm:get',()=>service.restSeconds());
+  handle('rhythm:set',value=>service.setRestSeconds(value));
   handle('characters:resize',(id,size)=>service.resize(id,size).then(publishRoles));
   handle('characters:clone',id=>service.clone(id).then(publishRoles));
   handle('characters:remove-clone',id=>service.clone(id,true).then(publishRoles));
@@ -43,6 +49,7 @@ if(!app.requestSingleInstanceLock()){app.quit();}else if(process.argv.includes('
   handle('characters:show-all',()=>showAll());
   handle('characters:import',async()=>{const result=await dialog.showOpenDialog(window,{title:'选择角色项目（包含 config.json 和 animations 文件夹）',properties:['openDirectory']});if(result.canceled)return null;return service.importProject(result.filePaths[0]);});
   handle('client:quit',()=>quitAll());
+  if(mac){app.on('activate',show);app.on('before-quit',event=>{if(!quitting){event.preventDefault();void quitAll();}});}
   await window.loadFile(path.join(__dirname,'index.html'));
   if(process.argv.includes('--verify-ai'))void require('./verify-ai.cjs').verifyAI(window,ai,service);
  }).catch(e=>{dialog.showErrorBox('控制台出错',e.message);app.quit();});

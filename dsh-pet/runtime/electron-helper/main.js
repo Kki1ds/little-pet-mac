@@ -67,6 +67,8 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 // "Electron"，userData 便落到 %APPDATA%\Electron —— 那是所有这么跑的 Electron 脚本的公共目录，
 // 我们的 DPI 缓存与 Chromium profile 都会和别人混在一起。必须赶在任何 getPath('userData') 之前设。
 app.setName('dsh-pet-electron-helper');
+// macOS：每个角色一个 Helper 进程，不隐藏的话每开一个角色 Dock 栏就多一个图标。
+if (process.platform === 'darwin') app.dock?.hide();
 if (process.env.DSH_PET_INSTANCE_ID) {
   const instance = process.env.DSH_PET_INSTANCE_ID.replace(/[^a-zA-Z0-9_-]/g, '_');
   app.setPath('userData', path.join(app.getPath('appData'), 'dsh-pet-character-' + instance));
