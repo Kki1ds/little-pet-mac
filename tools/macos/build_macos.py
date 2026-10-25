@@ -180,7 +180,9 @@ def main():
     with open(plist_path, 'rb') as f:
         plist = plistlib.load(f)
     plist.update(CFBundleName=APP_NAME, CFBundleDisplayName=APP_NAME, CFBundleIdentifier=BUNDLE_ID,
-                 CFBundleIconFile='app.icns', CFBundleShortVersionString=VERSION, CFBundleVersion=VERSION)
+                 CFBundleIconFile='app.icns', CFBundleShortVersionString=VERSION, CFBundleVersion=VERSION,
+                 # Menu-bar app: no Dock icon or flash at launch; client/main.cjs shows the Dock icon if the user turns it on.
+                 LSUIElement=True)
     with open(plist_path, 'wb') as f:
         plistlib.dump(plist, f)
 

@@ -62,6 +62,13 @@ const restInput=document.querySelector('#rest-seconds');
 document.querySelector('#rest-apply').onclick=()=>{if(!restInput.reportValidity()||restInput.value==='')return;run(async()=>{restInput.value=String(await api.setRestSeconds(Number(restInput.value)));},'动作间隔已更新，下一个动作起生效');};
 api.restSeconds().then(v=>{restInput.value=String(v);}).catch(()=>{});
 document.querySelector('#quit').onclick=()=>run(()=>api.quit());
+if(api.platform==='darwin'){
+ const dockRow=document.querySelector('.dock-setting'),dockToggle=document.querySelector('#dock-toggle');
+ const setDock=value=>dockToggle.setAttribute('aria-checked',String(value));
+ dockRow.hidden=false;document.querySelector('#footer-hint').textContent='关闭控制页后，宠物会继续运行。可从菜单栏图标重新打开。';
+ dockToggle.onclick=()=>run(async()=>{setDock(await api.setShowDock(dockToggle.getAttribute('aria-checked')!=='true'));},'Dock 栏图标设置已更新');
+ api.showDock().then(setDock).catch(()=>{});api.onDockChanged(setDock);
+}
 // Transparent VP9 previews decode in software; only play them while the console is in front.
 function previewsActive(){return !document.hidden&&document.hasFocus();}
 function syncPreviews(){const active=previewsActive();for(const video of container.querySelectorAll('.portrait video')){if(active)video.play().catch(()=>{});else video.pause();}}
