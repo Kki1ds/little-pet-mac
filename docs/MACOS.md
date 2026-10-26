@@ -23,7 +23,7 @@ python3 tools/macos/build_macos.py
 - 新版本带来的官方新动作会补进已安装的角色：缺的动画文件复制过去，动作名加到 `config.json` 的同一列表；位置、大小、显示状态、分身和自制动作不动。已经提供过的动作记在 `~/.dsh/pet-control-client/offered-actions.json`，您删掉的不会再被加回来。`main` 不参与（配置在 `main-config.jsonc`）。
 - 在某个角色身上按 Cmd+Q 只会暂时隐藏它（控制台开关同步变为隐藏）；下次启动应用会自动恢复，也可以随时在控制台重新开启。记录在 `~/.dsh/pet-control-client/quick-hidden.json`。
 - 应用菜单提供编辑快捷键（Cmd+C/V/A）；控制台在前台时 Cmd+Q 关闭全部桌宠；开启 Dock 图标时点它也能重新打开控制台。
-- 菜单栏图标是模板图 `client/assets/trayTemplate.png`（+ `@2x`），系统按浅色/深色菜单栏自动着色；由 `tools/macos/tray-icon/make_tray_icon.py` 生成。
+- 菜单栏图标是从应用图标裁出的彩色小克头像 `client/assets/trayColor.png`（+ `@2x`，26×18pt），由 `tools/macos/tray-icon/make_color_tray_icon.py` 生成。备选的黑白模板剪影 `trayTemplate.png` 由 `make_tray_icon.py` 生成，换回时在 `client/main.cjs` 改文件名并加 `setTemplateImage(true)`。
 - AI 密钥用 Electron safeStorage 保存，在 macOS 上由钥匙串加密，首次保存可能弹出钥匙串授权。
 - `client/verify.cjs`（PowerShell 窗口检查）只适用于 Windows，未打包进 macOS 版。
 

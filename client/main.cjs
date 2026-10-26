@@ -34,9 +34,9 @@ if(!app.requestSingleInstanceLock()){app.quit();}else if(process.argv.includes('
   window.on('close',event=>{if(!quitting){event.preventDefault();window.hide();}});
   window.on('show',()=>service.list().then(publishRoles).catch(()=>{}));
   window.once('ready-to-show',()=>window.show());
-  // trayTemplate.png (+@2x) is a monochrome template image, so macOS tints it for light/dark menu bars.
-  const image=mac?nativeImage.createFromPath(path.join(__dirname,'assets/trayTemplate.png')):nativeImage.createFromPath(appIcon).resize({width:24,height:24});
-  if(mac)image.setTemplateImage(true);
+  // trayColor.png (+@2x): 小克's head cut from the app icon, shown in colour on light and dark menu bars.
+  // The monochrome alternative is assets/trayTemplate.png (needs image.setTemplateImage(true)).
+  const image=mac?nativeImage.createFromPath(path.join(__dirname,'assets/trayColor.png')):nativeImage.createFromPath(appIcon).resize({width:24,height:24});
   tray=new Tray(image);tray.setToolTip('小小桌宠 · 宠物在后台陪伴');
   tray.on('click',show);tray.on('double-click',show);
   buildTrayMenu();
