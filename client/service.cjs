@@ -9,6 +9,9 @@ const sourcePackage = fs.existsSync(path.resolve(__dirname, '../dsh-pet/package.
 const PACKAGE = packaged ? bundled : path.resolve(__dirname, sourcePackage);
 const HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
 const ROOT = path.join(HOME, 'dsh-pet/characters');
+// Clips copied out of the app bundle are APFS clones on macOS: they share disk blocks with the
+// bundle's copy, so seeding ~/.dsh costs no extra space (falls back to a plain copy elsewhere).
+const CLONE = fs.constants.COPYFILE_FICLONE;
 let chatBridgeEnvironment = null;
 function setChatBridge(environment) {chatBridgeEnvironment = environment;}
 // Characters are seeded once, so .mov clips from a later build are copied into existing
@@ -23,7 +26,7 @@ function syncMov(src,dest) {
     if(!name.endsWith('.mov')||!fs.existsSync(path.join(dest,name.slice(0,-4)+'.webm')))continue;
     const from=path.join(src,name),target=path.join(dest,name);
     if(fs.existsSync(target)&&!(fresh&&(stamp||fs.statSync(target).size!==fs.statSync(from).size)))continue;
-    fs.copyFileSync(from,target+'.tmp');fs.renameSync(target+'.tmp',target);
+    fs.copyFileSync(from,target+'.tmp',CLONE);fs.renameSync(target+'.tmp',target);
   }
   if(stamp)fs.writeFileSync(path.join(dest,stampFile),stamp);
 }
@@ -49,7 +52,7 @@ function syncActions(entry,src,dest){
   const have=new Set(actionLists(cfg.animations).flatMap(([,v])=>v));for(const m of cfg.animations.moves?.actions||[])have.add(m.name);
   const lists=new Map(actionLists(cfg.animations));let changed=false;
   const add=(name,push)=>{seen.add(name);if(before.has(name)||have.has(name))return;const clip=path.join(src,'animations',name+'.webm');if(!fs.existsSync(clip))return;
-    const to=path.join(dest,'animations',name+'.webm');if(!fs.existsSync(to))fs.copyFileSync(clip,to);push();have.add(name);changed=true;};
+    const to=path.join(dest,'animations',name+'.webm');if(!fs.existsSync(to))fs.copyFileSync(clip,to,CLONE);push();have.add(name);changed=true;};
   for(const [key,names] of actionLists(seed.animations))for(const name of names)add(name,()=>{
     if(!lists.has(key)){if(key.startsWith('category:')){const cat={...seed.animations.categories.find(c=>'category:'+c.id===key),actions:[]};(cfg.animations.categories??=[]).push(cat);lists.set(key,cat.actions);}
       else if(key.startsWith('event:')){const list=[];(cfg.animations.events??={})[key.slice(6)]=list;lists.set(key,list);}else{const list=[];cfg.animations[key]=list;lists.set(key,list);}}
@@ -68,7 +71,7 @@ function seedCharacters() {
     if(fs.existsSync(dest)){try{syncActions(entry.name,path.join(seedRoot,entry.name),dest);}catch(e){console.error('[seed] action sync failed:',entry.name,e.message);}syncMov(path.join(seedRoot,entry.name,'animations'),path.join(dest,'animations'));continue;}
     if(entry.name==='main'&&['main-config.jsonc','main-config.json'].some(n=>fs.existsSync(path.join(HOME,'dsh-pet',n))))continue;
     if(fs.existsSync(path.join(HOME,'dsh-pet/pet',entry.name+'-config.json')))continue;
-    fs.cpSync(path.join(seedRoot,entry.name),dest,{recursive:true,errorOnExist:true,force:false});
+    fs.cpSync(path.join(seedRoot,entry.name),dest,{recursive:true,errorOnExist:true,force:false,mode:CLONE});
   }
 }
 function request(route, method = 'GET', body) {
@@ -143,7 +146,7 @@ async function importProject(folder) {
   // Stage outside the scanned character root; a partial import never becomes live.
   fs.mkdirSync(ROOT,{recursive:true});
   const temp=fs.mkdtempSync(path.join(HOME,'dsh-pet','.import-'));fs.mkdirSync(path.join(temp,'animations'),{recursive:true});
-  try {cfg.pets[0].display='none';cfg.pets[0].balanceEnabled=false;fs.writeFileSync(path.join(temp,'config.json'),JSON.stringify(cfg,null,2));for(const name of names)fs.copyFileSync(path.join(assets,name+'.webm'),path.join(temp,'animations',name+'.webm'));fs.renameSync(temp,projectDir(id));}
+  try {cfg.pets[0].display='none';cfg.pets[0].balanceEnabled=false;fs.writeFileSync(path.join(temp,'config.json'),JSON.stringify(cfg,null,2));for(const name of names)fs.copyFileSync(path.join(assets,name+'.webm'),path.join(temp,'animations',name+'.webm'),CLONE);fs.renameSync(temp,projectDir(id));}
   catch(e){fs.rmSync(temp,{recursive:true,force:true});throw e;}
   return list();
 }
