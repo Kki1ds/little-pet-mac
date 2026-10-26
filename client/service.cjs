@@ -27,6 +27,37 @@ function syncMov(src,dest) {
   }
   if(stamp)fs.writeFileSync(path.join(dest,stampFile),stamp);
 }
+// New official actions in a later build reach characters that are already installed: missing clips
+// are copied and their names added to the same list in the installed config.json. Names the build
+// has offered before are recorded in offered-actions.json, so an action the user removed stays removed.
+// Positions, sizes, display state, clones and custom actions are left as they are. main keeps its
+// own config layout (main-config.jsonc) and is skipped.
+const offeredFile=path.join(HOME,'pet-control-client','offered-actions.json');
+function actionLists(a){
+  const lists=[];for(const k of ['idle','turn','drag','clicks'])if(Array.isArray(a[k]))lists.push([k,a[k]]);
+  for(const c of a.categories||[])lists.push(['category:'+c.id,c.actions||[]]);
+  for(const [k,v] of Object.entries(a.events||{}))if(Array.isArray(v)&&v.every(x=>typeof x==='string'))lists.push(['event:'+k,v]);
+  return lists;
+}
+function syncActions(entry,src,dest){
+  const cfgFile=path.join(dest,'config.json'),seedFile=path.join(src,'config.json');
+  if(entry==='main'||!fs.existsSync(cfgFile)||!fs.existsSync(seedFile))return;
+  const cfg=JSON.parse(fs.readFileSync(cfgFile,'utf8')),seed=JSON.parse(fs.readFileSync(seedFile,'utf8'));
+  if(!cfg.animations||!seed.animations)return;
+  let offered={};try{offered=JSON.parse(fs.readFileSync(offeredFile,'utf8'));}catch{}
+  const before=new Set(offered[entry]||[]),seen=new Set(offered[entry]||[]);
+  const have=new Set(actionLists(cfg.animations).flatMap(([,v])=>v));for(const m of cfg.animations.moves?.actions||[])have.add(m.name);
+  const lists=new Map(actionLists(cfg.animations));let changed=false;
+  const add=(name,push)=>{seen.add(name);if(before.has(name)||have.has(name))return;const clip=path.join(src,'animations',name+'.webm');if(!fs.existsSync(clip))return;
+    const to=path.join(dest,'animations',name+'.webm');if(!fs.existsSync(to))fs.copyFileSync(clip,to);push();have.add(name);changed=true;};
+  for(const [key,names] of actionLists(seed.animations))for(const name of names)add(name,()=>{
+    if(!lists.has(key)){if(key.startsWith('category:')){const cat={...seed.animations.categories.find(c=>'category:'+c.id===key),actions:[]};(cfg.animations.categories??=[]).push(cat);lists.set(key,cat.actions);}
+      else if(key.startsWith('event:')){const list=[];(cfg.animations.events??={})[key.slice(6)]=list;lists.set(key,list);}else{const list=[];cfg.animations[key]=list;lists.set(key,list);}}
+    lists.get(key).push(name);});
+  for(const move of seed.animations.moves?.actions||[])if(cfg.animations.moves)add(move.name,()=>(cfg.animations.moves.actions??=[]).push(move));
+  if(changed){fs.writeFileSync(cfgFile+'.tmp',JSON.stringify(cfg,null,2));fs.renameSync(cfgFile+'.tmp',cfgFile);}
+  offered[entry]=[...seen];fs.mkdirSync(path.dirname(offeredFile),{recursive:true});fs.writeFileSync(offeredFile,JSON.stringify(offered));
+}
 function seedCharacters() {
   const seedRoot=path.resolve(__dirname,'../../characters');
   if(!packaged||!fs.existsSync(seedRoot))return;
@@ -34,7 +65,7 @@ function seedCharacters() {
   for(const entry of fs.readdirSync(seedRoot,{withFileTypes:true})){
     if(!entry.isDirectory()||!/^[a-zA-Z0-9_-]+$/.test(entry.name))continue;
     const dest=projectDir(entry.name);
-    if(fs.existsSync(dest)){syncMov(path.join(seedRoot,entry.name,'animations'),path.join(dest,'animations'));continue;}
+    if(fs.existsSync(dest)){try{syncActions(entry.name,path.join(seedRoot,entry.name),dest);}catch(e){console.error('[seed] action sync failed:',entry.name,e.message);}syncMov(path.join(seedRoot,entry.name,'animations'),path.join(dest,'animations'));continue;}
     if(entry.name==='main'&&['main-config.jsonc','main-config.json'].some(n=>fs.existsSync(path.join(HOME,'dsh-pet',n))))continue;
     if(fs.existsSync(path.join(HOME,'dsh-pet/pet',entry.name+'-config.json')))continue;
     fs.cpSync(path.join(seedRoot,entry.name),dest,{recursive:true,errorOnExist:true,force:false});
@@ -127,4 +158,4 @@ function restSeconds(){try{const v=JSON.parse(fs.readFileSync(rhythmFile,'utf8')
 function setRestSeconds(value){if(!Number.isInteger(value)||value<0||value>600)throw Error('动作间隔请填写 0–600 的整数秒');fs.mkdirSync(path.dirname(rhythmFile),{recursive:true});const temp=rhythmFile+'.tmp';fs.writeFileSync(temp,JSON.stringify({restSeconds:value}));fs.renameSync(temp,rhythmFile);return value;}
 function clone(id,remove=false){const operation=writes.then(async()=>{await find(id);await request(base+(remove?'/pet-clone-remove':'/pet-clone'),'POST',{id});return list();});writes=operation.catch(()=>{});return operation;}
 function resize(id,size){const operation=writes.then(async()=>{await find(id);await request(base+'/pet-size','POST',{id,size});return list();});writes=operation.catch(()=>{});return operation;}
-module.exports={quickHiddenFile,restoreQuickHidden,restSeconds,setRestSeconds,PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};
+module.exports={syncActions,quickHiddenFile,restoreQuickHidden,restSeconds,setRestSeconds,PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};

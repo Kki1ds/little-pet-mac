@@ -20,3 +20,24 @@ test('first import creates the character root on a fresh installation',async()=>
 test('bad action paths are rejected before any project is installed',async()=>{
  const f=fixture();try{f.cfg.animations.moves.actions=[{name:'../escape'}];f.save();await assert.rejects(f.api.importProject(f.folder),/动作文件名/);assert.ok(!fs.existsSync(path.join(f.api.ROOT,'testgirl')));}finally{f.cleanup();}
 });
+test('new official actions reach an installed character once, keeping the user\'s edits',()=>{
+ const f=fixture();try{
+  const src=path.join(f.home,'seed/testgirl'),dest=path.join(f.api.ROOT,'testgirl');
+  for(const dir of [src,dest])fs.mkdirSync(path.join(dir,'animations'),{recursive:true});
+  for(const n of ['站立','挥手','跳跳'])fs.writeFileSync(path.join(src,'animations',n+'.webm'),n);
+  fs.writeFileSync(path.join(dest,'animations','站立.webm'),'old');fs.writeFileSync(path.join(dest,'animations','自制.webm'),'mine');
+  const seed=structuredClone(f.cfg);seed.animations.categories[0].actions=['站立','挥手'];seed.animations.categories.push({id:'玩耍',actions:['跳跳'],weight:1});
+  const installed=structuredClone(f.cfg);installed.pets[0].size=300;installed.animations.categories[0].actions=['站立','自制'];
+  fs.writeFileSync(path.join(src,'config.json'),JSON.stringify(seed));fs.writeFileSync(path.join(dest,'config.json'),JSON.stringify(installed));
+  const read=()=>JSON.parse(fs.readFileSync(path.join(dest,'config.json'),'utf8'));
+  f.api.syncActions('testgirl',src,dest);
+  let cfg=read();
+  assert.deepEqual(cfg.animations.categories.map(c=>[c.id,c.actions]),[['小动作',['站立','自制','挥手']],['玩耍',['跳跳']]]);
+  assert.equal(cfg.pets[0].size,300);
+  assert.equal(fs.readFileSync(path.join(dest,'animations','站立.webm'),'utf8'),'old');
+  assert.ok(fs.existsSync(path.join(dest,'animations','挥手.webm')));
+  cfg.animations.categories[0].actions=['站立','自制'];fs.writeFileSync(path.join(dest,'config.json'),JSON.stringify(cfg));
+  f.api.syncActions('testgirl',src,dest);
+  assert.deepEqual(read().animations.categories[0].actions,['站立','自制']);
+ }finally{f.cleanup();}
+});

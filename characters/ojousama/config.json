@@ -3,7 +3,7 @@
     {
       "id": "ojousama1",
       "name": "小克",
-      "size": 462,
+      "size": 280,
       "balanceEnabled": true,
       "whisperEnabled": false,
       "workStatusEnabled": false,
@@ -96,5 +96,9 @@
     "ceilingBounce": true,
     "throwPower": 1,
     "petCollision": true
+  },
+  "eventsRefreshSec": {
+    "balance": 1800,
+    "whisper": 300
   }
 }
