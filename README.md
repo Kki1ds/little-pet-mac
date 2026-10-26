@@ -35,20 +35,11 @@ Windows 桌面宠物客户端，当前版本 **v1.0.5**。
 
 角色数据位于 `%USERPROFILE%\.dsh\dsh-pet\characters`。
 
-## 安卓手机版
-
-**[下载安卓 APK（v0.2.0）](https://github.com/yshuang722-spec/xiaoxiao-zhuochong/releases/download/android-v0.2.0/xiaoxiao-zhuochong-android-v0.2.0.apk)** · [安卓发布页与安装步骤](https://github.com/yshuang722-spec/xiaoxiao-zhuochong/releases/tag/android-v0.2.0) · [完整安卓源码及素材](https://github.com/yshuang722-spec/xiaoxiao-zhuochong/releases/download/android-v0.2.0/xiaoxiao-zhuochong-android-v0.2.0-source.zip)
-
-适用于 Android 8.0 及以上。安装后允许悬浮显示，选择角色并离开控制页即可使用。支持五角色、动作轮播、拖动弹跳与碰撞、分身、大小调整、角色资料、AI 对话和日夜外观；AI 对话需自行配置接口。本次包含动作切换时的漂移与闪跳修复。
-
-安卓手机版与下方 Windows 版分别下载、分别安装；Windows 更新包不适用于安卓。暂未提供安卓自动更新。
-
 
 ## 源码与构建
 
 Windows 客户端在 `client/`，六角色配置、成品动画和人设在 `characters/`。实际运行的引擎 JavaScript 在 `dsh-pet/lib/` 与 `dsh-pet/runtime/`，同时保留原 TypeScript 源码；直接重编原 TypeScript 会覆盖本项目已有集成改动。
 
-安卓当前已发布版本的完整源码和成品素材在 `android/`，构建方法见 [Android BUILD](android/BUILD.md)。安卓与 Windows 分别发布和安装。
 
 Windows 可使用 `tools/client-release/build-1.0.5.py` 配合已有 Electron 与 Node 运行环境构建。GitHub 自动生成的 Source code 是源码；直接使用请下载上面的完整客户端 ZIP。
 
