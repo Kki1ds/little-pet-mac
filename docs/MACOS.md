@@ -14,7 +14,7 @@ python3 tools/macos/build_macos.py
 
 ## 与 Windows 版的区别
 
-- 数据目录：`~/.dsh/dsh-pet/characters`，客户端设置和日志在 `~/.dsh/pet-control-client`。内置角色的动画只在 .app 里（客户端通过 `DSH_PET_BUNDLED_CHARACTERS` 告诉宿主），`~/.dsh` 里每个角色只有配置、人设和一个空的 `animations` 文件夹；放进这个文件夹的同名片段会覆盖内置的。旧版本复制出来的、与 .app 相同的片段会在启动时自动删掉。
+- 数据目录：`~/.dsh/dsh-pet/characters`，客户端设置和日志在 `~/.dsh/pet-control-client`。内置角色的动画只在 .app 里（客户端通过 `DSH_PET_BUNDLED_CHARACTERS` 告诉宿主），`~/.dsh` 里每个角色只有一个配置文件；自己新建 `<角色>/animations` 放进同名片段可以覆盖内置的。旧版本复制出来的、与 .app 相同的片段和人设文件会在启动时自动删掉（精简版不用人设）。
 - 宿主服务由 Electron 自带的 Node 运行（`ELECTRON_RUN_AS_NODE`），不附带 `node.exe`；引擎下载 Electron 用的两个依赖换成了空实现，打包后的应用不会下载 Electron。
 - 默认只在菜单栏显示（Info.plist 设 `LSUIElement`），Dock 里没有图标。点菜单栏图标可打开控制台、全部开启/隐藏或退出。
 - 控制台「在 Dock 栏显示图标」开关（或菜单栏菜单里的同名勾选项）可以把 Dock 图标加回来，设置存在 `~/.dsh/pet-control-client/mac-settings.json`，立即生效。

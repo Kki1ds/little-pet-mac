@@ -23,6 +23,10 @@ function dropBundledCopies(src,dest) {
     const mine=path.join(dest,name),theirs=path.join(src,name);
     if(name==='.mov-build'||(name.endsWith('.mov')&&fs.existsSync(theirs))||(name.endsWith('.webm')&&fs.existsSync(theirs)&&fs.statSync(mine).size===fs.statSync(theirs).size))fs.rmSync(mine,{force:true});
   }
+  if(!fs.readdirSync(dest).length)fs.rmdirSync(dest);
+  // The seeded persona copy is unused in the lite build; drop it while it still matches the bundle's.
+  const persona=path.join(path.dirname(dest),'人设.json'),bundled=path.join(path.dirname(src),'人设.json');
+  if(fs.existsSync(persona)&&fs.existsSync(bundled)&&fs.readFileSync(persona).equals(fs.readFileSync(bundled)))fs.rmSync(persona);
 }
 // New official actions in a later build reach characters that are already installed: their names
 // are added to the same list in the installed config.json (the clips are served from the bundle). Names the build
@@ -65,10 +69,10 @@ function seedCharacters() {
     if(fs.existsSync(dest)){try{syncActions(entry.name,path.join(seedRoot,entry.name),dest);}catch(e){console.error('[seed] action sync failed:',entry.name,e.message);}dropBundledCopies(path.join(seedRoot,entry.name,'animations'),path.join(dest,'animations'));continue;}
     if(entry.name==='main'&&['main-config.jsonc','main-config.json'].some(n=>fs.existsSync(path.join(HOME,'dsh-pet',n))))continue;
     if(fs.existsSync(path.join(HOME,'dsh-pet/pet',entry.name+'-config.json')))continue;
-    // Clips stay in the app bundle (the host falls back to it, DSH_PET_BUNDLED_CHARACTERS); ~/.dsh gets
-    // the config, persona and an empty animations folder for the user's own clips.
-    fs.cpSync(path.join(seedRoot,entry.name),dest,{recursive:true,errorOnExist:true,force:false,mode:CLONE,filter:src=>path.basename(path.dirname(src))!=='animations'});
-    fs.mkdirSync(path.join(dest,'animations'),{recursive:true});
+    // Clips and persona stay in the app bundle (the host falls back to it, DSH_PET_BUNDLED_CHARACTERS);
+    // ~/.dsh only gets the config. Clips the user adds go in <character>/animations and override.
+    fs.mkdirSync(dest,{recursive:true});
+    for(const name of ['config.json','config.jsonc'])if(fs.existsSync(path.join(seedRoot,entry.name,name)))fs.copyFileSync(path.join(seedRoot,entry.name,name),path.join(dest,name));
   }
 }
 function request(route, method = 'GET', body) {
