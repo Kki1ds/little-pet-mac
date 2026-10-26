@@ -56,3 +56,6 @@ work/
 *.log
 .env
 .env.*
+
+*.keystore
+*.jks
