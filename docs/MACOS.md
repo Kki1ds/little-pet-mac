@@ -14,13 +14,13 @@ python3 tools/macos/build_macos.py
 
 ## 与 Windows 版的区别
 
-- 数据目录：`~/.dsh/dsh-pet/characters`，客户端设置和日志在 `~/.dsh/pet-control-client`。
+- 数据目录：`~/.dsh/dsh-pet/characters`，客户端设置和日志在 `~/.dsh/pet-control-client`。内置角色的动画只在 .app 里（客户端通过 `DSH_PET_BUNDLED_CHARACTERS` 告诉宿主），`~/.dsh` 里每个角色只有配置、人设和一个空的 `animations` 文件夹；放进这个文件夹的同名片段会覆盖内置的。旧版本复制出来的、与 .app 相同的片段会在启动时自动删掉。
 - 宿主服务由 Electron 自带的 Node 运行（`ELECTRON_RUN_AS_NODE`），不附带 `node.exe`；引擎下载 Electron 用的两个依赖换成了空实现，打包后的应用不会下载 Electron。
 - 默认只在菜单栏显示（Info.plist 设 `LSUIElement`），Dock 里没有图标。点菜单栏图标可打开控制台、全部开启/隐藏或退出。
 - 控制台「在 Dock 栏显示图标」开关（或菜单栏菜单里的同名勾选项）可以把 Dock 图标加回来，设置存在 `~/.dsh/pet-control-client/mac-settings.json`，立即生效。
 - 每个角色是一个独立的 Helper 进程，始终不在 Dock 显示。
 - 上游的 `android/`（安卓版源码和素材）以及黑毛小狐狸（`characters/character5`）、奶茶千金（`characters/character6`）不保留在本仓库；以后合并上游新版本时，这些路径出现冲突就 `git rm -r` 掉。
-- 新版本带来的官方新动作会补进已安装的角色：缺的动画文件复制过去，动作名加到 `config.json` 的同一列表；位置、大小、显示状态、分身和自制动作不动。已经提供过的动作记在 `~/.dsh/pet-control-client/offered-actions.json`，您删掉的不会再被加回来。`main` 不参与（配置在 `main-config.jsonc`）。
+- 新版本带来的官方新动作会补进已安装的角色：动作名加到 `config.json` 的同一列表；位置、大小、显示状态、分身和自制动作不动。已经提供过的动作记在 `~/.dsh/pet-control-client/offered-actions.json`，您删掉的不会再被加回来。`main` 不参与（配置在 `main-config.jsonc`）。
 - 在某个角色身上按 Cmd+Q 只会暂时隐藏它（控制台开关同步变为隐藏）；下次启动应用会自动恢复，也可以随时在控制台重新开启。记录在 `~/.dsh/pet-control-client/quick-hidden.json`。
 - 应用菜单提供编辑快捷键（Cmd+C/V/A）；控制台在前台时 Cmd+Q 关闭全部桌宠；开启 Dock 图标时点它也能重新打开控制台。
 - 菜单栏图标是从应用图标裁出的彩色小克头像 `client/assets/trayColor.png`（+ `@2x`，26×18pt），由 `tools/macos/tray-icon/make_color_tray_icon.py` 生成。备选的黑白模板剪影 `trayTemplate.png` 由 `make_tray_icon.py` 生成，换回时在 `client/main.cjs` 改文件名并加 `setTemplateImage(true)`。

@@ -3616,7 +3616,12 @@ function apply(ctx) {
 		};
 		const extraAnimDir = resolveAsset(petConfigDir, petId + "-animation");
 		const projectAnimDir = resolveAsset(join(userRoot, "characters"), petId + "/animations");
-		const file = projectAnimDir !== void 0 && existsSync(projectAnimDir) ? resolveExisting(projectAnimDir, fileName) : extraAnimDir !== void 0 && existsSync(extraAnimDir) ? resolveExisting(extraAnimDir, fileName) : resolveExisting(userRootFor(ext), fileName) ?? resolveExisting(assetRootFor(ext), fileName);
+		// Mac client: bundled characters' clips stay inside the app (DSH_PET_BUNDLED_CHARACTERS); the user's
+		// project folder holds the config and only clips that override or add to the bundled ones.
+		const bundledRoot = process.env.DSH_PET_BUNDLED_CHARACTERS;
+		const bundledAnimDir = bundledRoot ? resolveAsset(bundledRoot, petId + "/animations") : void 0;
+		const fromBundle = () => bundledAnimDir !== void 0 && existsSync(bundledAnimDir) ? resolveExisting(bundledAnimDir, fileName) : void 0;
+		const file = projectAnimDir !== void 0 && existsSync(projectAnimDir) ? resolveExisting(projectAnimDir, fileName) ?? fromBundle() : fromBundle() ?? (extraAnimDir !== void 0 && existsSync(extraAnimDir) ? resolveExisting(extraAnimDir, fileName) : resolveExisting(userRootFor(ext), fileName) ?? resolveExisting(assetRootFor(ext), fileName));
 		if (file === void 0) return {
 			kind: "text",
 			status: 404,
