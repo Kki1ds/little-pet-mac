@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lift the darker ojousama clips to the tone of the idle clip (待机-翻书).
+"""Lift the darker 小克 clips (characters/Claude) to the tone of the idle clip (待机-翻书).
 
 The upstream clips came in batches: one has dimmer, pinker whites and duller hair, and
 变身Fable模型 is washed out on its own. Each curve maps that clip group's black ribbon,

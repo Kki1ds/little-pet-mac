@@ -13,7 +13,7 @@ PermissionRequest among them) keep deciding exactly as before.
 install and uninstall copy ~/.claude/settings.json to
 settings.json.bak-before-little-pet-<time> before writing, and touch only the
 entries whose command posts to the pet host. install also turns on work status
-for 小克 in ~/.dsh/dsh-pet/characters/ojousama/config.json (backed up the same
+for 小克 in ~/.dsh/dsh-pet/characters/Claude/config.json (backed up the same
 way), adding the clip slots if that copy predates them, and turns it off for
 every other pet, since all pets share the host's one work status.
 """
@@ -49,7 +49,8 @@ EVENTS = {
 }
 
 REPO = Path(__file__).resolve().parents[2]
-BUNDLED_PET = REPO / "characters" / "ojousama" / "config.json"
+PET_DIR = "Claude"
+BUNDLED_PET = REPO / "characters" / PET_DIR / "config.json"
 
 
 def settings_path() -> Path:
@@ -60,7 +61,11 @@ def settings_path() -> Path:
 def pet_config_path() -> Path:
     home = os.environ.get("DSH_HOME")
     root = Path(home).expanduser() if home else Path.home() / ".dsh"
-    return root / "dsh-pet" / "characters" / "ojousama" / "config.json"
+    characters = root / "dsh-pet" / "characters"
+    # Installs the app has not migrated yet still keep 小克 in the old ojousama folder.
+    if not (characters / PET_DIR).exists() and (characters / "ojousama").exists():
+        return characters / "ojousama" / "config.json"
+    return characters / PET_DIR / "config.json"
 
 
 def ours(hook) -> bool:
@@ -157,9 +162,10 @@ def enable_pet() -> None:
 
 def quiet_others() -> None:
     """Turns work status off for every pet but 小克: the host's work status is one for all pets."""
-    root = pet_config_path().parents[1]
+    pet = pet_config_path()
+    root = pet.parents[1]
     files = [f for f in sorted(root.glob("*/config.json*")) + sorted((root.parent / "pet").glob("*.json*"))
-             if f.parent.name != "ojousama" and ".bak-" not in f.name and f.suffix in (".json", ".jsonc")]
+             if f.parent.name != pet.parent.name and ".bak-" not in f.name and f.suffix in (".json", ".jsonc")]
     for path in files:
         text = path.read_text(encoding="utf-8")
         # Text replace, not a JSON rewrite: config.jsonc may carry comments.
@@ -242,7 +248,7 @@ def status() -> None:
         print(f"  小克 work status: {'on' if on and slots else 'off'} ({pet})")
     root = pet.parents[1]
     loud = [f.parent.name for f in sorted(root.glob("*/config.json*"))
-            if f.parent.name != "ojousama" and ".bak-" not in f.name
+            if f.parent.name != pet.parent.name and ".bak-" not in f.name
             and re.search(r'"workStatusEnabled"\s*:\s*true', f.read_text(encoding="utf-8"))]
     if loud:
         print(f"  also reacting: {', '.join(loud)} (run install again to turn them off)")

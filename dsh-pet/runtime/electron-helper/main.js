@@ -465,6 +465,7 @@ function petsFromEnv() {
     if (Array.isArray(arr) && arr.length > 0) {
       return arr.map((p, i) => ({
         id: String(p?.id ?? `pet-${i}`),
+        name: typeof p?.name === 'string' && p.name.trim() ? p.name.trim() : '',
         size: Number(p?.size) > 0 ? Number(p.size) : 462,
         index: i,
       }));
@@ -510,7 +511,8 @@ function createPetWindows() {
     // 初始窗口尺寸也要吃缩放补偿，否则启动瞬间会有一次可见的尺寸跳变
     const { width, height } = petWindowSize(pet.size * scale);
     const win = new BrowserWindow({
-      title: '桌宠角色 · ' + pet.id,
+      // Mission Control and the window list show the character's own name.
+      title: pet.name || pet.id,
       parent: taskbarOwner,
       width,
       height,
