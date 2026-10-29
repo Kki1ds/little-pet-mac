@@ -59,6 +59,14 @@ const { HOST_POLL_MS, hostIsGone, isBrokenPipeError, parseHostPid } = require('.
 // 全局 DPI 线性化的纯判定与换算（含平台例外：macOS 的 DIP 已是「点」，无需补偿；见该文件头）
 const { shouldLinearize, resolveForcedScale, resolvePetScale } = require('./dpi-linearization.js');
 const { buildDeskGeometry } = require('./desktop-geometry.js');
+// 全屏避让（macOS）：别的应用全屏时把那块屏上的宠物藏起来（检测与判定见 fullscreen-guard.js 头部）
+const {
+  FULLSCREEN_POLL_MS,
+  FULLSCREEN_RESTART_MS,
+  FULLSCREEN_MAX_RESTARTS,
+  parseFullScreenLine,
+  shouldConceal,
+} = require('./fullscreen-guard.js');
 
 // 允许无用户手势直接播放（余额动画等）
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -365,6 +373,7 @@ function moveWindow(win, rect) {
       else win.setContentBounds(r, false);
       st.w = r.width;
       st.h = r.height;
+      if (fullScreenDisplays.length || fullScreenConcealed.size) guardFullScreen(win);
     } catch (e) {
       // A timer callback has no caller: an uncaught error here pops a dialog mid-drag.
       console.error('[dsh-pet-desktop-helper] move failed:', e && e.message ? e.message : e);
@@ -420,14 +429,20 @@ function updatePetState(petId, partial) {
 /**
  * 每窗口当前穿透状态（true = 整窗点击穿透）。所有 setIgnoreMouseEvents 只经本文件
  * （创建时初始化 + pet:set-interactive 翻转 + 光标兜底轮询），这里镜像真实状态，供冒烟断言/排查使用
- * （Electron 无 isIgnoringMouseEvents 取值 API）。
+ * （Electron 无 isIgnoringMouseEvents 取值 API）。全屏避让期间窗口实际一律穿透，这里仍记各通道要的状态，
+ * 恢复时按它还原。
  */
 const windowIgnore = new Map();
 
+/** 全屏避让中（全透明 + 整窗穿透）的窗口 id，见「全屏避让」一节 */
+const fullScreenConcealed = new Set();
+
 /** 翻转整窗穿透的**唯一出口**：状态与 windowIgnore 镜像永远一起更新（穿透期间保留 forward） */
 function setWindowIgnore(win, ignore) {
-  win.setIgnoreMouseEvents(ignore, { forward: true });
   windowIgnore.set(win.id, ignore);
+  // 藏起来的宠物不转发鼠标：看不见的宠物不该有悬停反应，也不该被渲染端翻成可交互
+  if (fullScreenConcealed.has(win.id)) win.setIgnoreMouseEvents(true);
+  else win.setIgnoreMouseEvents(ignore, { forward: true });
 }
 
 /** 兜底通道的光标轮询间隔（ms，与 issue #55 报告者实测值一致） */
@@ -452,6 +467,85 @@ const inputRegions = new Map();
 
 /** 每窗口「光标停在余量区且非 busy」的连续时长（ms）：到点由兜底通道强制恢复穿透 */
 const offBodyMs = new Map();
+
+// ---------- 全屏避让（macOS）：别的应用全屏时，落在那块屏上的宠物变全透明 + 整窗穿透 ----------
+// 检测交给原生小程序 macos/fullscreen-watch（build_macos.py 编译进 app），它在结果变化时输出一行 JSON；
+// 本进程逐窗看宠物身体有没有一半以上落在这些屏上。只动 alpha 与输入，不 hide()：渲染、计时、位置都照旧，
+// 也不碰 Cmd+Q 临时隐藏（那条走宿主，整个 helper 退出）和仅菜单栏模式（客户端自己的 Dock 图标）。
+// DSH_PET_FULLSCREEN_YIELD=0 关闭；没有检测程序（开发流没编译）时只记一条日志，宠物照常显示。
+let fullScreenDisplays = [];
+
+/** 按当前全屏屏列表判定一只宠物，状态变了才动窗口 */
+function guardFullScreen(win) {
+  if (win.isDestroyed()) return;
+  const concealed = fullScreenConcealed.has(win.id);
+  const hide = shouldConceal({
+    bounds: win.getContentBounds(),
+    margin: petMargins.get(win.id),
+    displays: fullScreenDisplays,
+    busy: inputBusy.get(win.id) === true,
+    concealed,
+  });
+  if (hide === concealed) return;
+  if (hide) fullScreenConcealed.add(win.id);
+  else fullScreenConcealed.delete(win.id);
+  win.setOpacity(hide ? 0 : 1);
+  setWindowIgnore(win, windowIgnore.get(win.id) !== false);
+}
+
+function guardAllFullScreen() {
+  for (const win of windows.values()) guardFullScreen(win);
+}
+
+function startFullScreenWatch() {
+  if (process.platform !== 'darwin' || process.env.DSH_PET_FULLSCREEN_YIELD === '0') return;
+  const watcher = path.join(__dirname, 'macos', 'fullscreen-watch');
+  const { spawn } = require('node:child_process');
+  const { existsSync } = require('node:fs');
+  if (!existsSync(watcher)) {
+    console.error('[dsh-pet-desktop-helper] full-screen yield off: ' + watcher + ' not built');
+    return;
+  }
+  let restarts = 0;
+  let quitting = false;
+  let child = null;
+  const run = () => {
+    child = spawn(watcher, [String(process.pid), String(FULLSCREEN_POLL_MS)], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let buffered = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      buffered += chunk;
+      let end;
+      while ((end = buffered.indexOf('\n')) >= 0) {
+        const displays = parseFullScreenLine(buffered.slice(0, end));
+        buffered = buffered.slice(end + 1);
+        if (!displays) continue;
+        fullScreenDisplays = displays;
+        guardAllFullScreen();
+      }
+    });
+    child.on('error', (error) => console.error('[dsh-pet-desktop-helper] full-screen watch failed:', error.message));
+    child.on('exit', (code, signal) => {
+      child = null;
+      if (quitting) return;
+      // 检测程序没了就当没有全屏：宁可宠物露出来，也不能让它一直藏着
+      fullScreenDisplays = [];
+      guardAllFullScreen();
+      if (restarts >= FULLSCREEN_MAX_RESTARTS) {
+        console.error('[dsh-pet-desktop-helper] full-screen watch gave up after ' + restarts + ' restarts');
+        return;
+      }
+      restarts += 1;
+      console.error('[dsh-pet-desktop-helper] full-screen watch exited (' + (signal || code) + '), restarting');
+      setTimeout(run, FULLSCREEN_RESTART_MS).unref?.();
+    });
+  };
+  run();
+  app.on('will-quit', () => {
+    quitting = true;
+    child?.kill();
+  });
+}
 
 /**
  * 桌面宠物列表（[{id,size}]）：宿主经 DSH_PET_PETS 透传（每只宠物一个窗口）。
@@ -541,6 +635,8 @@ function createPetWindows() {
       },
     });
     win.on('page-title-updated', (event) => event.preventDefault());
+    // 启动或重新显示时若已在别的应用全屏中，先藏好再说（不等下一次移动）
+    win.on('show', () => guardFullScreen(win));
     win.setAlwaysOnTop(true, 'screen-saver');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     // 窗口被其他窗口（另一只宠物）完全遮挡时，Chromium 默认会暂停本窗口渲染，
@@ -618,6 +714,7 @@ function createPetWindows() {
       lastRequestedBounds.delete(win.id);
       petMargins.delete(win.id);
       windowIgnore.delete(win.id);
+      fullScreenConcealed.delete(win.id);
       inputBusy.delete(win.id);
       inputRegions.delete(win.id);
       offBodyMs.delete(win.id);
@@ -789,6 +886,7 @@ app.whenReady().then(() => {
   }
 
   createPetWindows();
+  startFullScreenWatch();
 
   // 宠物窗口跟随：renderer 逐帧上报窗口内容区位置/尺寸
   ipcMain.on('pet:set-bounds', (event, bounds) => {
@@ -888,6 +986,7 @@ app.whenReady().then(() => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed()) return;
     inputBusy.set(win.id, !!busy);
+    if (!busy) guardFullScreen(win); // 拖拽/菜单期间推迟的避让在这里补上
     const petId = [...windows.keys()].find(id => windows.get(id) === win);
     if (petId && petStates.has(petId)) updatePetState(petId, {});
   });
