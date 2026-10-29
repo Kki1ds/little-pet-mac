@@ -1,3 +1,5 @@
+// Muted previews would otherwise take Chromium's Video Wake Lock and keep the display awake (see engine renderer.js).
+window.addEventListener('playing',e=>{if(e.target instanceof HTMLVideoElement)e.stopImmediatePropagation();},true);
 const api=window.petClient,container=document.querySelector('#characters'),feedback=document.querySelector('#feedback');
 let roles=[],busy=false;const expanded=new Set(),cloneExpanded=new Set();
 function message(text,error=false){feedback.textContent=text;feedback.className=error?'error':'';}
