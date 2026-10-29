@@ -137,8 +137,9 @@ def enable_pet() -> None:
         if isinstance(pet, dict) and pet.get("workStatusEnabled") is not True:
             pet["workStatusEnabled"] = True
             changed = True
-    if "workStatusTexts" not in config:
-        config["workStatusTexts"] = bundled.get("workStatusTexts", [])
+    # An empty list was the first build's "animation only"; the bundled short lines replace it.
+    if not config.get("workStatusTexts"):
+        config["workStatusTexts"] = bundled["workStatusTexts"]
         changed = True
     events = config.setdefault("animations", {}).setdefault("events", {})
     if "workStatus" not in events:
