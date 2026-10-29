@@ -214,9 +214,9 @@ function modelSelectionValid(value) {
 	if (typeof m.provider !== "string" || typeof m.model !== "string") return false;
 	return m.provider.trim() === "" === (m.model.trim() === "");
 }
-/** workStatusTexts 段校验：二维数组——外层每项都是非空字符串数组（档位文案，每档可多句随机）；空数组不可用 */
+/** workStatusTexts 段校验：二维数组——外层每项都是非空字符串数组（档位文案，每档可多句随机）；空数组 = 不弹文字只播动画 */
 function workStatusTextsValid(value) {
-	if (!Array.isArray(value) || value.length === 0) return false;
+	if (!Array.isArray(value)) return false;
 	for (const group of value) {
 		if (!Array.isArray(group) || group.length === 0) return false;
 		for (const text of group) if (typeof text !== "string" || text.length === 0) return false;
@@ -1682,6 +1682,45 @@ function decideAnim(args) {
 //#endregion
 //#region src/host/work-status.ts
 /**
+* Claude Code hook payload (its stdin JSON, little-pet-mac) → the session event reduceWorkStatus understands.
+* Tool results stay "working": one turn switches clips only at its start, first tool, approvals and end.
+*/
+function claudeHookWorkEvent(payload) {
+	const tool = String(payload?.tool_name ?? "");
+	switch (String(payload?.hook_event_name ?? "")) {
+		case "UserPromptSubmit": return { type: "turn/start" };
+		case "PreToolUse":
+			if (tool === "AskUserQuestion") return { type: "approval/asked" };
+			return {
+				type: "tool/call",
+				data: { name: tool }
+			};
+		case "PostToolUse":
+		case "PostToolUseFailure":
+		case "PreCompact": return {
+			type: "tool/call",
+			data: { name: tool || "compact" }
+		};
+		case "PermissionRequest":
+		case "Notification": return { type: "approval/asked" };
+		case "Stop": return {
+			type: "turn/end",
+			data: { reason: { kind: "completed" } }
+		};
+		case "StopFailure": return {
+			type: "turn/end",
+			data: { reason: { kind: "error" } }
+		};
+		case "SessionEnd": return {
+			type: "turn/end",
+			data: { reason: { kind: "aborted" } }
+		};
+		default: return null;
+	}
+}
+/** A tool event this soon after Stop is a late async hook of the finished turn */
+const CLAUDE_LATE_MS = 3e3;
+/**
 * turn/end reason.kind → 状态：
 *   completed → success、错误系（error/max-tokens/timeout）→ error、blocked → waiting（回合被阻塞，等用户确认）；
 *   其余（aborted 等）→ null＝该会话回合已结束，由调用方清理会话回空闲——绝不残留上一档
@@ -2592,6 +2631,38 @@ function apply(ctx) {
 		state.writeSection("notify", frame);
 	};
 	const turnFlags = new Map();
+	/** Claude Code sessions (little-pet-mac): last event time, and when their last turn ended */
+	const claudeSeen = new Map();
+	const claudeTurnEnded = new Map();
+	const CLAUDE_STALE_MS = 10 * 60 * 1e3;
+	let claudeSeq = 0;
+	const handleClaudeHook = (payload) => {
+		const name = String(payload?.hook_event_name ?? "");
+		const id = String(payload?.session_id ?? "");
+		if (!id) return false;
+		const event = claudeHookWorkEvent(payload);
+		if (!event) return false;
+		const sessionId = "claude:" + id;
+		const now = Date.now();
+		claudeSeen.set(sessionId, now);
+		if (event.type === "turn/start") claudeTurnEnded.delete(sessionId);
+		else if (event.type === "turn/end") claudeTurnEnded.set(sessionId, now);
+		else {
+			// Hooks run async, so a PostToolUse can land just after Stop; it must not undo the finished turn.
+			const ended = claudeTurnEnded.get(sessionId);
+			if (ended !== void 0 && now - ended < CLAUDE_LATE_MS) return false;
+			claudeTurnEnded.delete(sessionId);
+		}
+		applyWorkEvent(sessionId, {
+			...event,
+			seq: ++claudeSeq
+		});
+		if (name === "SessionEnd") {
+			claudeSeen.delete(sessionId);
+			claudeTurnEnded.delete(sessionId);
+		}
+		return true;
+	};
 	/** 终态（success/error）展示窗口定时器：约 60s 后清掉该会话条目，陈旧完成态不再浮上来（Bug 2/3） */
 	const terminalTimers = new Map();
 	const TERMINAL_KEEP_MS = 60 * 1e3;
@@ -3410,6 +3481,28 @@ function apply(ctx) {
 				};
 			}
 		}
+		if (rest === "claude-hook") {
+			if (method !== "POST") return {
+				kind: "json",
+				status: 405,
+				obj: { error: "method not allowed" }
+			};
+			let parsed;
+			try {
+				parsed = JSON.parse(body ?? "null");
+			} catch {
+				return {
+					kind: "json",
+					status: 400,
+					obj: { error: "invalid JSON body" }
+				};
+			}
+			return {
+				kind: "json",
+				status: 200,
+				obj: { ok: handleClaudeHook(parsed && typeof parsed === "object" ? parsed : {}) }
+			};
+		}
 		if (rest === "anim") {
 			if (method !== "POST") return {
 				kind: "json",
@@ -3648,64 +3741,66 @@ function apply(ctx) {
 			}
 		}
 	}), "dsh-pet: /dsh-pet-7340 asset route");
-	ctx.effect(() => {
-		const dispose = ctx.on("session/event", (session, event) => {
-			const type = event?.type;
-			if (!type) return;
-			const sessionId = String(session?.header?.id ?? session?.id ?? "unknown");
-			if (type === "todo/write") {
-				if (workStatus.has(sessionId)) {
-					workStatus.setTask(sessionId, currentTaskFromTodo(event));
-					publishWorkStatus();
-				}
-				return;
-			}
-			if (type === "user/message") {
-				const source = event?.data?.source;
-				if (source?.kind === "goal") {
-					const flags = turnFlags.get(sessionId) ?? {
-						goalRound: false,
-						closing: null
-					};
-					flags.goalRound = true;
-					turnFlags.set(sessionId, flags);
-				}
-				return;
-			}
-			if (type === "turn/start") {
-				turnFlags.set(sessionId, {
-					goalRound: false,
-					closing: null
-				});
-				workStatus.setTask(sessionId, null);
+	const applyWorkEvent = (sessionId, event) => {
+		const type = event?.type;
+		if (!type) return;
+		if (type === "todo/write") {
+			if (workStatus.has(sessionId)) {
+				workStatus.setTask(sessionId, currentTaskFromTodo(event));
 				publishWorkStatus();
 			}
-			if (type === "tool/call" && String(event?.data?.name ?? "") === GOAL_UPDATE_TOOL) {
-				const action = goalUpdateAction(String(event?.data?.arguments ?? ""));
-				if (action) {
-					const flags = turnFlags.get(sessionId) ?? {
-						goalRound: false,
-						closing: null
-					};
-					flags.closing = action;
-					turnFlags.set(sessionId, flags);
-				}
+			return;
+		}
+		if (type === "user/message") {
+			const source = event?.data?.source;
+			if (source?.kind === "goal") {
+				const flags = turnFlags.get(sessionId) ?? {
+					goalRound: false,
+					closing: null
+				};
+				flags.goalRound = true;
+				turnFlags.set(sessionId, flags);
 			}
-			const next = reduceWorkStatus(event, turnFlags.get(sessionId));
-			if (!next) {
-				if (type === "turn/end") {
-					turnFlags.delete(sessionId);
-					cancelTerminalCleanup(sessionId);
-					workStatus.clear(sessionId);
-					publishWorkStatus();
-				}
-				return;
-			}
-			const seq = Number(event.seq ?? 0);
-			if (!workStatus.setState(sessionId, next, seq)) return;
+			return;
+		}
+		if (type === "turn/start") {
+			turnFlags.set(sessionId, {
+				goalRound: false,
+				closing: null
+			});
+			workStatus.setTask(sessionId, null);
 			publishWorkStatus();
-			if (next === "success" || next === "error") scheduleTerminalCleanup(sessionId);
-			else cancelTerminalCleanup(sessionId);
+		}
+		if (type === "tool/call" && String(event?.data?.name ?? "") === GOAL_UPDATE_TOOL) {
+			const action = goalUpdateAction(String(event?.data?.arguments ?? ""));
+			if (action) {
+				const flags = turnFlags.get(sessionId) ?? {
+					goalRound: false,
+					closing: null
+				};
+				flags.closing = action;
+				turnFlags.set(sessionId, flags);
+			}
+		}
+		const next = reduceWorkStatus(event, turnFlags.get(sessionId));
+		if (!next) {
+			if (type === "turn/end") {
+				turnFlags.delete(sessionId);
+				cancelTerminalCleanup(sessionId);
+				workStatus.clear(sessionId);
+				publishWorkStatus();
+			}
+			return;
+		}
+		const seq = Number(event.seq ?? 0);
+		if (!workStatus.setState(sessionId, next, seq)) return;
+		publishWorkStatus();
+		if (next === "success" || next === "error") scheduleTerminalCleanup(sessionId);
+		else cancelTerminalCleanup(sessionId);
+	};
+	ctx.effect(() => {
+		const dispose = ctx.on("session/event", (session, event) => {
+			applyWorkEvent(String(session?.header?.id ?? session?.id ?? "unknown"), event);
 		});
 		return () => {
 			dispose();
@@ -3713,6 +3808,23 @@ function apply(ctx) {
 			terminalTimers.clear();
 		};
 	}, "dsh-pet: work-status session events");
+	// Claude Code hooks (little-pet-mac): POST /claude-hook carries a hook's stdin JSON. A session that
+	// goes quiet (Esc interrupts send no Stop) is cleared after CLAUDE_STALE_MS.
+	ctx.effect(() => {
+		const timer = setInterval(() => {
+			const now = Date.now();
+			for (const [sessionId, at] of claudeSeen) {
+				if (now - at < CLAUDE_STALE_MS) continue;
+				claudeSeen.delete(sessionId);
+				claudeTurnEnded.delete(sessionId);
+				if (workStatus.has(sessionId)) applyWorkEvent(sessionId, {
+					type: "turn/end",
+					data: { reason: { kind: "aborted" } }
+				});
+			}
+		}, 60 * 1e3);
+		return () => clearInterval(timer);
+	}, "dsh-pet: claude-hook staleness");
 	ctx.effect(() => {
 		const sessionDispose = ctx.on(
 			"session/event",

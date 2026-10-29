@@ -6,7 +6,7 @@
       "size": 280,
       "balanceEnabled": true,
       "whisperEnabled": false,
-      "workStatusEnabled": false,
+      "workStatusEnabled": true,
       "fixedEnabled": false,
       "display": "none",
       "position": {
@@ -16,6 +16,7 @@
       }
     }
   ],
+  "workStatusTexts": [],
   "animations": {
     "idle": [
       "待机-翻书"
@@ -81,6 +82,24 @@
         "揪头发碎碎念",
         "翻书碎碎念",
         "傲娇碎碎念"
+      ],
+      "workStatus": [
+        "翻书碎碎念",
+        "对屏碎碎念",
+        "翻书碎碎念",
+        [
+          "傲娇碎碎念",
+          "查看发饰"
+        ],
+        [
+          "剪刀手",
+          "欢快舞蹈",
+          "优雅转圈"
+        ],
+        [
+          "生气转身",
+          "揪头发碎碎念"
+        ]
       ]
     }
   },
