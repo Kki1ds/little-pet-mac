@@ -6,7 +6,7 @@
       "size": 280,
       "balanceEnabled": true,
       "whisperEnabled": false,
-      "workStatusEnabled": false,
+      "workStatusEnabled": true,
       "fixedEnabled": false,
       "display": "none",
       "position": {
@@ -15,6 +15,31 @@
         "marginY": 60
       }
     }
+  ],
+  "workStatusTexts": [
+    [
+      "在想…",
+      "让我想想…"
+    ],
+    [
+      "动手中…",
+      "在干活了"
+    ],
+    [
+      "这步好了"
+    ],
+    [
+      "等您批准",
+      "等您回话"
+    ],
+    [
+      "搞定啦",
+      "做完了"
+    ],
+    [
+      "出错了…",
+      "卡住了"
+    ]
   ],
   "animations": {
     "idle": [
@@ -81,6 +106,24 @@
         "揪头发碎碎念",
         "翻书碎碎念",
         "傲娇碎碎念"
+      ],
+      "workStatus": [
+        "翻书碎碎念",
+        "对屏碎碎念",
+        "翻书碎碎念",
+        [
+          "傲娇碎碎念",
+          "查看发饰"
+        ],
+        [
+          "剪刀手",
+          "欢快舞蹈",
+          "优雅转圈"
+        ],
+        [
+          "生气转身",
+          "揪头发碎碎念"
+        ]
       ]
     }
   },

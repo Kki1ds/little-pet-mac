@@ -27,6 +27,22 @@ python3 tools/macos/build_macos.py
 - AI 密钥用 Electron safeStorage 保存，在 macOS 上由钥匙串加密，首次保存可能弹出钥匙串授权。
 - `client/verify.cjs`（PowerShell 窗口检查）只适用于 Windows，未打包进 macOS 版。
 
+## Claude Code 工作状态
+
+小克可以跟着本机 Claude Code 的状态换动作：您发消息后翻书碎碎念，开始用工具后对屏碎碎念，等您批准或回答时傲娇碎碎念 / 查看发饰，一轮答完随机播剪刀手 / 欢快舞蹈 / 优雅转圈，出错时生气转身 / 揪头发碎碎念。同时弹一句短话（「在想…」「等您批准」「搞定啦」等，在小克配置的 `workStatusTexts` 里改，六档与动作一一对应；写成空数组 `[]` 就只播动画不弹字）。
+
+```sh
+python tools/macos/claude_hooks.py install     # 装 hooks，并在 ~/.dsh 里打开小克的工作状态
+python tools/macos/claude_hooks.py status      # 看装了哪些、宿主在不在听
+python tools/macos/claude_hooks.py uninstall   # 只删小克自己的 hooks
+```
+
+- hooks 全部是异步的 curl，把 hook 的 JSON 发到 `http://127.0.0.1:3081/dsh-pet-7340/claude-hook`，不输出、不做任何决定，与 agent-hud 等其它工具的 hooks（包括阻塞审批的 PermissionRequest）并存。桌宠没开时 curl 立即失败退出，不影响 Claude Code。
+- 每次写 `~/.claude/settings.json` 和小克配置前都会备份为 `*.bak-before-little-pet-<时间>`；识别自己的条目只看命令里是否含上面的地址。
+- 宿主按会话聚合，多个会话同时在跑时按「等待 > 出错 > 工作 > 思考 > 成功」显示最要紧的一个。按 Esc 打断不会触发 Stop，该会话 10 分钟没有事件后自动回到待机。
+- 工作状态是所有桌宠共用的一份，所以只有小克打开：`install` 会把其它角色配置里的 `workStatusEnabled` 改成 false（同样先备份），内置默认也已改为关闭。开关和文案改了不用重启桌宠，下一秒就生效。
+- 装完后重启已开着的 Claude Code 会话。
+
 ## 安装包（可选）
 
 ```sh

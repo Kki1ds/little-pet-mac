@@ -155,9 +155,9 @@
       // 后台碎碎念会顶掉正在跑的任务的 KV cache（与 DSH 多子代理同因）。
       // 不需要碎碎念的宠物改为 false（设置页也可开关）。
       "whisperEnabled": true,
-      // 工作状态联动默认开启：监听 DSH 会话事件（工具调用等），按
-      // animations.events.workStatus 数组切档位动画 + 气泡（仅监听，不调用模型）。
-      "workStatusEnabled": true,
+      // 工作状态联动：按 animations.events.workStatus 数组切档位动画 + 气泡（仅监听，不调用模型）。
+      // macOS 版里事件来自 Claude Code hooks，只给小克（ojousama）打开，这只默认关闭。
+      "workStatusEnabled": false,
       // 宠物固定：true = 随机动画链不再抽「转向 / 移动」两档——宠物不自己翻朝向、也不自己
       // 走开，只播原地待机与随机小动作（两档原本的权重自然并入随机小动作，见文件末尾
       // animationWeights 的说明）。默认 false = 保持原行为（会自己走、会自己翻）。
