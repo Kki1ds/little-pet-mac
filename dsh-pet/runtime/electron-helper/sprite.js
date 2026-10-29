@@ -1252,7 +1252,8 @@ class PetSprite {
    * pointerleave 未必派发，提示会赖在屏幕上不走；几何判定与点击穿透翻转同源，才不会有第二种口径。
    */
   setTip(on) {
-    const next = !!on;
+    // Name tooltip turned off on this build: the tip stays hidden and the window never widens for it.
+    const next = false; // was: !!on
     if (next === this.tipOn) return;
     this.tipOn = next;
     this.updateRoom();
