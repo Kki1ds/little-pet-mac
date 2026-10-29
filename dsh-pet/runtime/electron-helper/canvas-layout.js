@@ -8,9 +8,9 @@
   // Standing feet line per character and canvas, in source pixels (median over the clips).
   // Characters listed here are moved onto `floor`; the rest keep the original layout.
   const feetLines = Object.freeze({
-    ojousama: Object.freeze({ '640x360':329, '1280x720':630, '1280x960':878 }),
-    character3: Object.freeze({ '1280x720':634, '1280x960':851 }),
-    character4: Object.freeze({ '1280x720':630, '1280x960':850 }),
+    Claude: Object.freeze({ '640x360':329, '1280x720':630, '1280x960':878 }),
+    Grok: Object.freeze({ '1280x720':634, '1280x960':851 }),
+    GPT: Object.freeze({ '1280x720':630, '1280x960':850 }),
   });
   function layout(width, height, petSize, assetRoot) {
     if (![width,height,petSize].every(n=>Number.isFinite(n)&&n>0)) return null;
@@ -34,7 +34,7 @@
     const ref = isNew ? reference : previousReference;
     if (!isNew && Math.abs(width/height-previousReference.width/previousReference.height)>0.002) return null;
     // White dragon calibration measured from its actual idle first frame (1280x720).
-    const idle = isNew && assetRoot==='character4' ? {height:532,feet:632} : {height:535,feet:634};
+    const idle = isNew && assetRoot==='GPT' ? {height:532,feet:632} : {height:535,feet:634};
     const subjectHeight = petSize*idle.height/1280;
     const scale = subjectHeight/ref.subjectHeight;
     const bottom = feet || ref.subjectBottom;

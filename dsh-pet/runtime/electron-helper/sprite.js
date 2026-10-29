@@ -28,6 +28,11 @@ function liteMenuTree(animations) {
 }
 
 // 两个动作之间的待机时长：控制台可调（见 preload restSeconds），未设置时 20 秒；0 = 原版行为（动作接连播放）
+// Bundled characters (and upstream-style characterN packs) that rotate their own 小动作 playlist.
+const PLAYLIST_ROOTS = ['Claude', 'Grok', 'GPT'];
+function playlistRoot(root) {
+  return PLAYLIST_ROOTS.includes(root) || /^character\d+$/.test(root);
+}
 const DEFAULT_IDLE_REST_MS = 20000;
 function idleRestMs() {
   const seconds = window.petBridge?.restSeconds?.();
@@ -557,7 +562,7 @@ class PetSprite {
     // fading video layers makes the desktop briefly show through every cycle.
     // Keep other pets and interaction/movement playback on their original path.
     const continuousIdle =
-      ['ojousama', 'character3'].includes(this.assetRoot) &&
+      ['Claude', 'Grok'].includes(this.assetRoot) &&
       !this.animations.categories.some((c) => c.id === '小动作' && c.actions.length > 1) &&
       this.animations.idle.length === 1 &&
       name === this.animations.idle[0] &&
@@ -585,7 +590,7 @@ class PetSprite {
     const { animations, animationWeights } = { animations: this.animations, animationWeights: this.weights };
     const smallActions = animations.categories.find((c) => c.id === '小动作')?.actions;
     if (this.restBeforeNextAction()) return;
-    if ((this.assetRoot === 'ojousama' || /^character\d+$/.test(this.assetRoot)) && smallActions?.length && !this.workOn) {
+    if (playlistRoot(this.assetRoot) && smallActions?.length && !this.workOn) {
       // Rotate every small action, including the idle entry, without repeating
       // the same clip through a fade when the category contains only one item.
       const from = smallActions.includes(this.restFrom) ? this.restFrom : this.anim;
@@ -669,7 +674,7 @@ class PetSprite {
     const { animations } = { animations: this.animations };
     // Configured custom pets resume their own small-action playlist after interaction.
     if (
-      (this.assetRoot === 'ojousama' || /^character\d+$/.test(this.assetRoot)) &&
+      playlistRoot(this.assetRoot) &&
       !this.workOn &&
       animations.categories.some((c) => c.id === '小动作' && c.actions.length > 0)
     ) {

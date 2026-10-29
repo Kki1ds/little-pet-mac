@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare .webm vs .mov playback in Electron: CPU and transparency.
 
-    python tools/macos/hevc/bench.py characters/ojousama/animations
+    python tools/macos/hevc/bench.py characters/Claude/animations
 
 Needs the .mov clips next to the .webm ones (run encode_mov.py first) and the
 Electron zip that build_macos.py caches in outputs/macos/.cache/. Writes

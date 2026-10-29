@@ -28,6 +28,49 @@ function dropBundledCopies(src,dest) {
   const persona=path.join(path.dirname(dest),'人设.json'),bundled=path.join(path.dirname(src),'人设.json');
   if(fs.existsSync(persona)&&fs.existsSync(bundled)&&fs.readFileSync(persona).equals(fs.readFileSync(bundled)))fs.rmSync(persona);
 }
+// Character folders carry each character's original model name. The other entries are their folder
+// names; main keeps its entry id (the engine's base config) and lives in characters/DeepSeek.
+const MAIN_DIR='DeepSeek';
+const RENAMED_DIRS={main:MAIN_DIR,character3:'Grok',character4:'GPT',ojousama:'Claude'};
+const RENAMED_PETS={'蓝毛小女仆':'大肥鱼','黄毛该溜子':'Grok','白毛小龙娘':'小白龙'};
+const namesFile=path.join(HOME,'pet-control-client','character-names.json');
+function entryOf(dir){return dir===MAIN_DIR?'main':dir;}
+function dirOf(entry){return entry==='main'?MAIN_DIR:entry;}
+function migrationPending(){
+  return !fs.existsSync(namesFile)||Object.keys(RENAMED_DIRS).some(from=>fs.existsSync(path.join(ROOT,from)));
+}
+function writeAtomic(file,text){fs.writeFileSync(file+'.tmp',text);fs.renameSync(file+'.tmp',file);}
+// Installs from before the rename: move the old folders and the offered-actions keys over once, and
+// give pets (and their clones) that still carry an old default name the new one. Pet ids stay, so
+// positions, sizes, clones, quick-hide and the work-status switch need no change. The new names are
+// applied only once (character-names.json), so a name the user sets later is never touched again.
+function migrateCharacters(){
+  for(const [from,to] of Object.entries(RENAMED_DIRS)){
+    const old=path.join(ROOT,from),dest=path.join(ROOT,to);
+    if(!fs.existsSync(old))continue;
+    // Both exist when an older build ran after the rename and seeded its folder again: keep the new
+    // folder and park the old one under a name the host does not scan, so the character is not doubled.
+    if(fs.existsSync(dest)){const parked=old+'.old-'+Date.now();fs.renameSync(old,parked);console.error('[migrate] kept',to,'and parked',from,'as',path.basename(parked));continue;}
+    fs.renameSync(old,dest);console.log('[migrate] character folder',from,'->',to);
+  }
+  let offered=null;try{offered=JSON.parse(fs.readFileSync(offeredFile,'utf8'));}catch{}
+  if(offered&&typeof offered==='object'){
+    let moved=false;
+    for(const [from,to] of Object.entries(RENAMED_DIRS))if(from!=='main'&&offered[from]){if(!offered[to])offered[to]=offered[from];delete offered[from];moved=true;}
+    if(moved)writeAtomic(offeredFile,JSON.stringify(offered));
+  }
+  if(fs.existsSync(namesFile))return;
+  const files=[path.join(HOME,'dsh-pet','main-config.jsonc')];
+  if(fs.existsSync(ROOT))for(const dir of fs.readdirSync(ROOT,{withFileTypes:true}))if(dir.isDirectory())for(const name of ['config.json','config.jsonc'])files.push(path.join(ROOT,dir.name,name));
+  // Text replace, not a JSON rewrite: config.jsonc may carry comments.
+  const pattern=new RegExp('("name"\\s*:\\s*")('+Object.keys(RENAMED_PETS).join('|')+')((?: · 分身\\d+)?")','g');
+  for(const file of files){
+    if(!fs.existsSync(file))continue;
+    const text=fs.readFileSync(file,'utf8'),next=text.replace(pattern,(_,head,old,tail)=>head+RENAMED_PETS[old]+tail);
+    if(next!==text){writeAtomic(file,next);console.log('[migrate] character names in',file);}
+  }
+  fs.mkdirSync(path.dirname(namesFile),{recursive:true});writeAtomic(namesFile,JSON.stringify({version:1}));
+}
 // New official actions in a later build reach characters that are already installed: their names
 // are added to the same list in the installed config.json (the clips are served from the bundle). Names the build
 // has offered before are recorded in offered-actions.json, so an action the user removed stays removed.
@@ -63,16 +106,16 @@ function seedCharacters() {
   const seedRoot=SEED_ROOT;
   if(!packaged||!fs.existsSync(seedRoot))return;
   fs.mkdirSync(ROOT,{recursive:true});
-  for(const entry of fs.readdirSync(seedRoot,{withFileTypes:true})){
-    if(!entry.isDirectory()||!/^[a-zA-Z0-9_-]+$/.test(entry.name))continue;
-    const dest=projectDir(entry.name);
-    if(fs.existsSync(dest)){try{syncActions(entry.name,path.join(seedRoot,entry.name),dest);}catch(e){console.error('[seed] action sync failed:',entry.name,e.message);}dropBundledCopies(path.join(seedRoot,entry.name,'animations'),path.join(dest,'animations'));continue;}
-    if(entry.name==='main'&&['main-config.jsonc','main-config.json'].some(n=>fs.existsSync(path.join(HOME,'dsh-pet',n))))continue;
-    if(fs.existsSync(path.join(HOME,'dsh-pet/pet',entry.name+'-config.json')))continue;
+  for(const dir of fs.readdirSync(seedRoot,{withFileTypes:true})){
+    if(!dir.isDirectory()||!/^[a-zA-Z0-9_-]+$/.test(dir.name))continue;
+    const entry=entryOf(dir.name),src=path.join(seedRoot,dir.name),dest=projectDir(entry);
+    if(fs.existsSync(dest)){try{syncActions(entry,src,dest);}catch(e){console.error('[seed] action sync failed:',entry,e.message);}dropBundledCopies(path.join(src,'animations'),path.join(dest,'animations'));continue;}
+    if(entry==='main'&&['main-config.jsonc','main-config.json'].some(n=>fs.existsSync(path.join(HOME,'dsh-pet',n))))continue;
+    if(fs.existsSync(path.join(HOME,'dsh-pet/pet',entry+'-config.json')))continue;
     // Clips and persona stay in the app bundle (the host falls back to it, DSH_PET_BUNDLED_CHARACTERS);
     // ~/.dsh only gets the config. Clips the user adds go in <character>/animations and override.
     fs.mkdirSync(dest,{recursive:true});
-    for(const name of ['config.json','config.jsonc'])if(fs.existsSync(path.join(seedRoot,entry.name,name)))fs.copyFileSync(path.join(seedRoot,entry.name,name),path.join(dest,name));
+    for(const name of ['config.json','config.jsonc'])if(fs.existsSync(path.join(src,name)))fs.copyFileSync(path.join(src,name),path.join(dest,name));
   }
 }
 function request(route, method = 'GET', body) {
@@ -87,20 +130,27 @@ function request(route, method = 'GET', body) {
     req.setTimeout(10000,()=>req.destroy(Error('桌宠服务响应超时')));req.on('error',reject);if(data)req.write(data);req.end();
   });
 }
+async function stopServer(reason) {
+  await request('/shutdown','POST');
+  for(let i=0;i<80;i++) {
+    await new Promise(r=>setTimeout(r,100));
+    try {await request('/health');} catch(e){if(['ECONNREFUSED','ECONNRESET'].includes(e.code))return;throw e;}
+  }
+  throw Error('旧桌宠服务未退出，'+reason);
+}
 async function ensureServer() {
+  if(migrationPending()){
+    // A running host (this build or an older one) still reads the old folders: stop it first.
+    try {await stopServer('无法迁移角色文件夹');} catch(e){if(!['ECONNREFUSED','ECONNRESET'].includes(e.code))throw e;}
+    migrateCharacters();
+  }
   seedCharacters();
   try {
     const health=await request('/health');
     if(path.resolve(health.plugin.root)!==PACKAGE)throw Error('3081 端口正在被另一个版本使用');
     if(!chatBridgeEnvironment)return;
     // A host left behind after a client crash has an obsolete ephemeral bridge.
-    await request('/shutdown','POST');
-    let stopped=false;
-    for(let i=0;i<80;i++) {
-      await new Promise(r=>setTimeout(r,100));
-      try {await request('/health');} catch(e){if(['ECONNREFUSED','ECONNRESET'].includes(e.code)){stopped=true;break;}throw e;}
-    }
-    if(!stopped)throw Error('旧桌宠服务未退出，无法更新对话连接');
+    await stopServer('无法更新对话连接');
   } catch(e){if(!['ECONNREFUSED','ECONNRESET'].includes(e.code))throw e;}
   const logDir=path.join(HOME,'pet-control-client/logs');fs.mkdirSync(logDir,{recursive:true});
   const out=fs.openSync(path.join(logDir,'server.stdout.log'),'a'),err=fs.openSync(path.join(logDir,'server.stderr.log'),'a');
@@ -119,13 +169,13 @@ const base='/dsh-pet-7340';
 function animationNames(a) {
   return [...new Set([...(a.idle||[]),...(a.turn||[]),...(a.drag||[]),...(a.clicks||[]),...(a.moves?.actions||[]).map(v=>v.name),...(a.categories||[]).flatMap(c=>c.actions),...Object.values(a.events||{}).flat(3).filter(n=>typeof n==='string')])];
 }
-function projectDir(entry) {if(!/^[a-zA-Z0-9_-]+$/.test(entry))throw Error('角色目录名无效');return path.join(ROOT,entry);}
+function projectDir(entry) {if(!/^[a-zA-Z0-9_-]+$/.test(entry))throw Error('角色目录名无效');return path.join(ROOT,dirOf(entry));}
 async function list() {
   const config=await request(base+'/config');const roles=[];
   for(const [entry,cfg] of Object.entries(config))for(const pet of cfg.pets||[]){
     const preview=cfg.animations.idle[0];let file=path.join(projectDir(entry),'animations',preview+'.webm');
     if(entry==='main'&&!fs.existsSync(file)&&!fs.existsSync(path.join(projectDir(entry),'animations')))file=path.join(PACKAGE,'assets/webm',preview+'.webm');
-    if(packaged&&!fs.existsSync(file)&&!fs.existsSync(file.slice(0,-5)+'.mov'))file=path.join(SEED_ROOT,entry,'animations',preview+'.webm');
+    if(packaged&&!fs.existsSync(file)&&!fs.existsSync(file.slice(0,-5)+'.mov'))file=path.join(SEED_ROOT,dirOf(entry),'animations',preview+'.webm');
     // macOS: console previews play the hardware-decoded .mov when the build added one.
     const mov=file.slice(0,-5)+'.mov';if(process.platform==='darwin'&&fs.existsSync(mov))file=mov;
     let poster='';const posterFile=path.join(__dirname,'assets',entry+'.png');if(fs.existsSync(posterFile))poster='data:image/png;base64,'+fs.readFileSync(posterFile).toString('base64');
@@ -164,4 +214,4 @@ function restSeconds(){try{const v=JSON.parse(fs.readFileSync(rhythmFile,'utf8')
 function setRestSeconds(value){if(!Number.isInteger(value)||value<0||value>600)throw Error('动作间隔请填写 0–600 的整数秒');fs.mkdirSync(path.dirname(rhythmFile),{recursive:true});const temp=rhythmFile+'.tmp';fs.writeFileSync(temp,JSON.stringify({restSeconds:value}));fs.renameSync(temp,rhythmFile);return value;}
 function clone(id,remove=false){const operation=writes.then(async()=>{await find(id);await request(base+(remove?'/pet-clone-remove':'/pet-clone'),'POST',{id});return list();});writes=operation.catch(()=>{});return operation;}
 function resize(id,size){const operation=writes.then(async()=>{await find(id);await request(base+'/pet-size','POST',{id,size});return list();});writes=operation.catch(()=>{});return operation;}
-module.exports={syncActions,quickHiddenFile,restoreQuickHidden,restSeconds,setRestSeconds,PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};
+module.exports={syncActions,migrateCharacters,migrationPending,quickHiddenFile,restoreQuickHidden,restSeconds,setRestSeconds,PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};
