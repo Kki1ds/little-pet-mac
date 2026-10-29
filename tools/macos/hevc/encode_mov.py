@@ -6,7 +6,7 @@ scripts/hevc_alpha_encoder.swift encodes them with AVFoundation's
 hevcWithAlpha codec, the same pipeline as scripts/encode_hevc_alpha.sh but
 with each clip's own size and frame rate.
 
-    python tools/macos/hevc/encode_mov.py characters/ojousama/animations/待机-翻书.webm
+    python tools/macos/hevc/encode_mov.py characters/Claude/animations/待机-翻书.webm
     python tools/macos/hevc/encode_mov.py characters/*/animations --out-dir same
 
 A .mov is written next to each .webm by default; --out-dir puts them elsewhere.

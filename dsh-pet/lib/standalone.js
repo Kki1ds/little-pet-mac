@@ -30,6 +30,10 @@ const PET_DISPLAYS = [
 ];
 const PET_DISPLAY_SET = new Set(PET_DISPLAYS);
 const ID_FORBIDDEN = /[\\/:\x00-\x1f]/;
+// Mac build: the main entry's character folder is named after the character (characters/DeepSeek);
+// its entry id stays "main", which the engine also uses for the base user config.
+const MAIN_CHARACTER_DIR = "DeepSeek";
+const characterDir = (entry) => entry === "main" ? MAIN_CHARACTER_DIR : entry;
 /**
 * 「全局默认 + 种类可覆盖」的顶层字段白名单 —— 用户层（main-config.jsonc）里写下的值会成为
 * **所有条目**的默认值；种类文件 `pet/<名>-config.json` 仍可在自己顶层覆盖（写了就用自己那份）。
@@ -122,7 +126,7 @@ function scanPetFiles(petDir) {
 	const projects = new Map(legacy.map((entry) => [entry.prefix, entry]));
 	const projectRoot = join(petDir, "..", "characters");
 	if (existsSync(projectRoot)) for (const dir of readdirSync(projectRoot, { withFileTypes: true })) {
-		if (!dir.isDirectory() || dir.name === "main" || !/^[a-zA-Z0-9_-]+$/.test(dir.name)) continue;
+		if (!dir.isDirectory() || dir.name === "main" || dir.name === MAIN_CHARACTER_DIR || !/^[a-zA-Z0-9_-]+$/.test(dir.name)) continue;
 		const file = join(projectRoot, dir.name, "config.json");
 		if (existsSync(file)) projects.set(dir.name, {
 			prefix: dir.name,
@@ -2585,7 +2589,7 @@ function readBody(req) {
 function apply(ctx) {
 	const dshHome = dshHomeDir();
 	const userRoot = join(dshHome, "dsh-pet");
-	const mainProjectConfig = join(userRoot, "characters", "main", "config.jsonc");
+	const mainProjectConfig = join(userRoot, "characters", MAIN_CHARACTER_DIR, "config.jsonc");
 	const userConfigPath = existsSync(mainProjectConfig) ? mainProjectConfig : join(userRoot, "main-config.jsonc");
 	const legacyUserConfigPath = join(userRoot, "main-config.json");
 	const petConfigDir = join(userRoot, "pet");
@@ -2916,6 +2920,7 @@ function apply(ctx) {
 		try {
 			return effectivePetList().filter((p) => isDesktopVisible$1(p.display)).map((p) => ({
 				id: String(p.id),
+				name: typeof p.name === "string" ? p.name : "",
 				size: Number(p.size)
 			}));
 		} catch {
@@ -3708,11 +3713,11 @@ function apply(ctx) {
 			body: "dsh-pet: unsupported animation format (expected .webm or .mov)"
 		};
 		const extraAnimDir = resolveAsset(petConfigDir, petId + "-animation");
-		const projectAnimDir = resolveAsset(join(userRoot, "characters"), petId + "/animations");
+		const projectAnimDir = resolveAsset(join(userRoot, "characters"), characterDir(petId) + "/animations");
 		// Mac client: bundled characters' clips stay inside the app (DSH_PET_BUNDLED_CHARACTERS); the user's
 		// project folder holds the config and only clips that override or add to the bundled ones.
 		const bundledRoot = process.env.DSH_PET_BUNDLED_CHARACTERS;
-		const bundledAnimDir = bundledRoot ? resolveAsset(bundledRoot, petId + "/animations") : void 0;
+		const bundledAnimDir = bundledRoot ? resolveAsset(bundledRoot, characterDir(petId) + "/animations") : void 0;
 		const fromBundle = () => bundledAnimDir !== void 0 && existsSync(bundledAnimDir) ? resolveExisting(bundledAnimDir, fileName) : void 0;
 		const file = projectAnimDir !== void 0 && existsSync(projectAnimDir) ? resolveExisting(projectAnimDir, fileName) ?? fromBundle() : fromBundle() ?? (extraAnimDir !== void 0 && existsSync(extraAnimDir) ? resolveExisting(extraAnimDir, fileName) : resolveExisting(userRootFor(ext), fileName) ?? resolveExisting(assetRootFor(ext), fileName));
 		if (file === void 0) return {
@@ -4187,7 +4192,7 @@ function configPathsFor(root, home) {
 	const userRoot = join(home, "dsh-pet");
 	return {
 		defaultFile: join(root, "assets", "config.jsonc"),
-		userFile: existsSync(join(userRoot, "characters", "main", "config.jsonc")) ? join(userRoot, "characters", "main", "config.jsonc") : join(userRoot, "main-config.jsonc"),
+		userFile: existsSync(join(userRoot, "characters", MAIN_CHARACTER_DIR, "config.jsonc")) ? join(userRoot, "characters", MAIN_CHARACTER_DIR, "config.jsonc") : join(userRoot, "main-config.jsonc"),
 		legacyUserFile: join(userRoot, "main-config.json"),
 		petDir: join(userRoot, "pet")
 	};

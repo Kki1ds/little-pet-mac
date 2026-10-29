@@ -41,3 +41,36 @@ test('new official actions reach an installed character once, keeping the user\'
   assert.deepEqual(read().animations.categories[0].actions,['站立','自制']);
  }finally{f.cleanup();}
 });
+test('old character folders and default names move to the new ones once, keeping ids and settings',()=>{
+ const f=fixture();try{
+  const {ROOT,HOME}=f.api,put=(rel,text)=>{const file=path.join(ROOT,rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,text);};
+  const read=rel=>fs.readFileSync(path.join(ROOT,rel),'utf8');
+  put('main/config.jsonc','{\n  // 注释\n  "pets": [{"id": "main", "name": "蓝毛小女仆", "size": 300}, {"id": "main__clone_1", "name": "蓝毛小女仆 · 分身1"}]\n}');
+  put('main/animations/自制.webm','mine');
+  put('character3/config.json',JSON.stringify({pets:[{id:'character3',name:'黄毛该溜子'}]}));
+  put('character4/config.json',JSON.stringify({pets:[{id:'character4',name:'我的龙'}]}));
+  put('ojousama/config.json',JSON.stringify({pets:[{id:'ojousama1',name:'小克',workStatusEnabled:true}]}));
+  const offered=path.join(HOME,'pet-control-client','offered-actions.json');fs.mkdirSync(path.dirname(offered),{recursive:true});
+  fs.writeFileSync(offered,JSON.stringify({ojousama:['待机-翻书'],character3:['叉腰嚣张']}));
+  assert.equal(f.api.migrationPending(),true);
+  f.api.migrateCharacters();
+  assert.deepEqual(fs.readdirSync(ROOT).sort(),['Claude','DeepSeek','GPT','Grok']);
+  assert.match(read('DeepSeek/config.jsonc'),/\/\/ 注释[\s\S]*"id": "main", "name": "大肥鱼", "size": 300[\s\S]*"name": "大肥鱼 · 分身1"/);
+  assert.equal(read('DeepSeek/animations/自制.webm'),'mine');
+  assert.equal(JSON.parse(read('Grok/config.json')).pets[0].name,'Grok');
+  assert.equal(JSON.parse(read('GPT/config.json')).pets[0].name,'我的龙');
+  assert.deepEqual(JSON.parse(read('Claude/config.json')).pets[0],{id:'ojousama1',name:'小克',workStatusEnabled:true});
+  assert.deepEqual(JSON.parse(fs.readFileSync(offered,'utf8')),{Claude:['待机-翻书'],Grok:['叉腰嚣张']});
+  assert.equal(f.api.projectDir('main'),path.join(ROOT,'DeepSeek'));
+  assert.equal(f.api.migrationPending(),false);
+  // A later rename by the user stays; an old folder seeded again by an older build is parked, not doubled.
+  put('Grok/config.json',JSON.stringify({pets:[{id:'character3',name:'黄毛该溜子'}]}));
+  put('ojousama/config.json','{}');
+  assert.equal(f.api.migrationPending(),true);
+  f.api.migrateCharacters();
+  assert.equal(JSON.parse(read('Grok/config.json')).pets[0].name,'黄毛该溜子');
+  assert.deepEqual(JSON.parse(read('Claude/config.json')).pets[0].name,'小克');
+  assert.ok(fs.readdirSync(ROOT).some(n=>/^ojousama\.old-\d+$/.test(n)));
+  assert.ok(!fs.existsSync(path.join(ROOT,'ojousama')));
+ }finally{f.cleanup();}
+});

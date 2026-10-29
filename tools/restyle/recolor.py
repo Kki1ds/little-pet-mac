@@ -1,4 +1,4 @@
-"""Recolor ojousama frames: orange hair -> warm red, orange eyes -> amber gold."""
+"""Recolor 小克 (characters/Claude) frames: orange hair -> warm red, orange eyes -> amber gold."""
 from pathlib import Path
 
 import cv2

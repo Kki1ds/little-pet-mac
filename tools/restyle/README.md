@@ -1,6 +1,6 @@
 # Restyle tools (private)
 
-Recolors the ojousama clips: orange hair to orange-red, orange eyes to amber gold.
+Recolors the 小克 clips (characters/Claude): orange hair to orange-red, orange eyes to amber gold.
 Needs `ffmpeg` with libvpx, `numpy`, `Pillow` and `opencv-python-headless<5`
 (OpenCV 5 dropped `CascadeClassifier`).
 
