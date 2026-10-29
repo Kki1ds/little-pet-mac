@@ -150,7 +150,7 @@ def main():
     parser.add_argument('--output', type=Path, help='new folder to create (default outputs/macos/<timestamp>)')
     parser.add_argument('--sign', default='-', metavar='IDENTITY', help='codesign identity, e.g. "Developer ID Application: Name (TEAMID)"; default ad-hoc')
     parser.add_argument('--dmg', action='store_true', help='also pack a .dmg next to the app')
-    parser.add_argument('--no-mov', action='store_true', help='skip the HEVC-alpha .mov clips (the pets then decode .webm in software)')
+    parser.add_argument('--mov', action='store_true', help='also encode HEVC-alpha .mov clips (hardware decoded, lighter on CPU; the cache in outputs/macos/.cache is reused). Without it the pets play the .webm clips')
     parser.add_argument('--notarize', metavar='PROFILE', help='notarize and staple the .dmg with this notarytool keychain profile (needs --sign and --dmg)')
     args = parser.parse_args()
     if args.notarize and (args.sign == '-' or not args.dmg):
@@ -202,7 +202,7 @@ def main():
     write_stub(engine, '@electron/get', "export async function downloadArtifact(){throw new Error('小小桌宠 macOS 版不下载 Electron');}\n")
     write_stub(engine, '@electron-internal/extract-zip', "export default async function extract(){throw new Error('小小桌宠 macOS 版不解压 Electron');}\n")
     shutil.copytree(ROOT / 'characters', res / 'characters')
-    if not args.no_mov:
+    if args.mov:
         add_mov_clips(res / 'characters', cache / 'mov-q75-a100-pm-601-srgb')  # new folder when encoder settings change
 
     sign(app, args.sign, out)
