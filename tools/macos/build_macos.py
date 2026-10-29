@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build 小小桌宠.app for macOS (personal use, ad-hoc signed).
 
-Uses only the macOS system Python, ditto, sips, iconutil and codesign. Node and npm
-are not needed: the client runs the pet host on Electron's own Node, and the
+Uses only the macOS system Python, ditto, sips, iconutil, codesign and clang (all from
+Xcode Command Line Tools; without clang the pets just don't step aside for full-screen apps).
+Node and npm are not needed: the client runs the pet host on Electron's own Node, and the
 packaged app never downloads Electron, so the engine's two download-only
 dependencies are replaced with stubs.
 
@@ -81,16 +82,32 @@ def is_macho(path):
     return magic in (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca')
 
 
+def build_fullscreen_watch(engine, arch):
+    """Compile the watcher the pets use to step aside for other apps' full-screen Spaces."""
+    src = ENGINE / 'runtime/electron-helper/macos/fullscreen-watch.c'
+    dest = engine / 'runtime/electron-helper/macos/fullscreen-watch'
+    try:
+        run('xcrun', 'clang', '-O2', '-Wall', '-arch', arch, '-mmacosx-version-min=12.0',
+            '-framework', 'CoreGraphics', '-framework', 'CoreFoundation', '-o', dest, src)
+    except (OSError, subprocess.CalledProcessError):
+        print('clang not available: building without full-screen yield (xcode-select --install to add it)', flush=True)
+
+
 def sign(app, identity, workdir):
     """Ad-hoc ('-') signs the bundle in one go; a Developer ID signs inside-out with the hardened runtime."""
+    # Loose executables in Resources (the full-screen watcher) are not nested code --deep would find.
+    engine = app / 'Contents' / 'Resources' / 'engine'
+    helpers = [p for p in engine.rglob('*') if p.is_file() and not p.is_symlink() and is_macho(p)]
     if identity == '-':
+        for item in helpers:
+            run('codesign', '--force', '--sign', '-', item)
         run('codesign', '--force', '--deep', '--sign', '-', app)
         return
     entitlements = workdir / 'entitlements.plist'
     entitlements.write_text(ENTITLEMENTS, 'utf-8')
     base = ['codesign', '--force', '--timestamp', '--options', 'runtime', '--entitlements', entitlements, '--sign', identity]
     frameworks = app / 'Contents' / 'Frameworks'
-    files = [p for p in frameworks.rglob('*') if p.is_file() and not p.is_symlink() and is_macho(p)]
+    files = helpers + [p for p in frameworks.rglob('*') if p.is_file() and not p.is_symlink() and is_macho(p)]
     bundles = [p for p in frameworks.rglob('*') if p.is_dir() and not p.is_symlink() and p.suffix in ('.app', '.framework')]
     # Deepest first: a bundle's signature seals what is inside it.
     for item in sorted(files + bundles, key=lambda p: len(p.parts), reverse=True):
@@ -199,6 +216,7 @@ def main():
     for name in ('package.json', 'LICENSE'):
         shutil.copy2(ENGINE / name, engine / name)
     # DSH_PET_ELECTRON_PATH is always set by the client, so these download-only modules never run.
+    build_fullscreen_watch(engine, args.arch)
     write_stub(engine, '@electron/get', "export async function downloadArtifact(){throw new Error('小小桌宠 macOS 版不下载 Electron');}\n")
     write_stub(engine, '@electron-internal/extract-zip', "export default async function extract(){throw new Error('小小桌宠 macOS 版不解压 Electron');}\n")
     shutil.copytree(ROOT / 'characters', res / 'characters')
