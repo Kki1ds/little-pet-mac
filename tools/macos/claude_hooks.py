@@ -14,12 +14,14 @@ install and uninstall copy ~/.claude/settings.json to
 settings.json.bak-before-little-pet-<time> before writing, and touch only the
 entries whose command posts to the pet host. install also turns on work status
 for 小克 in ~/.dsh/dsh-pet/characters/ojousama/config.json (backed up the same
-way), adding the clip slots if that copy predates them.
+way), adding the clip slots if that copy predates them, and turns it off for
+every other pet, since all pets share the host's one work status.
 """
 
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -153,6 +155,22 @@ def enable_pet() -> None:
     print(f"Turned on work status for 小克 in {path}")
 
 
+def quiet_others() -> None:
+    """Turns work status off for every pet but 小克: the host's work status is one for all pets."""
+    root = pet_config_path().parents[1]
+    files = [f for f in sorted(root.glob("*/config.json*")) + sorted((root.parent / "pet").glob("*.json*"))
+             if f.parent.name != "ojousama" and ".bak-" not in f.name and f.suffix in (".json", ".jsonc")]
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        # Text replace, not a JSON rewrite: config.jsonc may carry comments.
+        quiet = re.sub(r'("workStatusEnabled"\s*:\s*)true', r"\1false", text)
+        if quiet == text:
+            continue
+        print(f"Backed up {path.name} to {backup(path).name}")
+        path.write_text(quiet, encoding="utf-8")
+        print(f"Turned off work status in {path}")
+
+
 def install() -> None:
     path = settings_path()
     settings = read_json(path) if path.exists() else {}
@@ -170,6 +188,7 @@ def install() -> None:
     write_json(path, settings)
     print(f"Installed {len(EVENTS)} hooks in {path}")
     enable_pet()
+    quiet_others()
     print("New Claude Code sessions pick the hooks up; restart running ones.")
 
 
@@ -221,6 +240,12 @@ def status() -> None:
         on = all(p.get("workStatusEnabled") is True for p in config.get("pets", []) if isinstance(p, dict))
         slots = "workStatus" in config.get("animations", {}).get("events", {})
         print(f"  小克 work status: {'on' if on and slots else 'off'} ({pet})")
+    root = pet.parents[1]
+    loud = [f.parent.name for f in sorted(root.glob("*/config.json*"))
+            if f.parent.name != "ojousama" and ".bak-" not in f.name
+            and re.search(r'"workStatusEnabled"\s*:\s*true', f.read_text(encoding="utf-8"))]
+    if loud:
+        print(f"  also reacting: {', '.join(loud)} (run install again to turn them off)")
 
 
 def main() -> None:

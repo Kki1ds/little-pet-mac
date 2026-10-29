@@ -40,7 +40,8 @@ python tools/macos/claude_hooks.py uninstall   # 只删小克自己的 hooks
 - hooks 全部是异步的 curl，把 hook 的 JSON 发到 `http://127.0.0.1:3081/dsh-pet-7340/claude-hook`，不输出、不做任何决定，与 agent-hud 等其它工具的 hooks（包括阻塞审批的 PermissionRequest）并存。桌宠没开时 curl 立即失败退出，不影响 Claude Code。
 - 每次写 `~/.claude/settings.json` 和小克配置前都会备份为 `*.bak-before-little-pet-<时间>`；识别自己的条目只看命令里是否含上面的地址。
 - 宿主按会话聚合，多个会话同时在跑时按「等待 > 出错 > 工作 > 思考 > 成功」显示最要紧的一个。按 Esc 打断不会触发 Stop，该会话 10 分钟没有事件后自动回到待机。
-- 装完后重启已开着的 Claude Code 会话和小小桌宠。
+- 工作状态是所有桌宠共用的一份，所以只有小克打开：`install` 会把其它角色配置里的 `workStatusEnabled` 改成 false（同样先备份），内置默认也已改为关闭。开关和文案改了不用重启桌宠，下一秒就生效。
+- 装完后重启已开着的 Claude Code 会话。
 
 ## 安装包（可选）
 

@@ -264,6 +264,13 @@ async function refreshAnimationConfig(version) {
     sprite.weights = pet.animationWeights;
     sprite.pet.animations = pet.animations;
     sprite.pet.animationWeights = pet.animationWeights;
+    // 工作状态开关与文案也随配置热更新（macOS 版的 claude_hooks.py 会改它们，免得重启桌宠）
+    sprite.pet.workStatusTexts = pet.workStatusTexts;
+    if (sprite.pet.workStatusEnabled && !pet.workStatusEnabled && sprite.workState) {
+      sprite.pet.workStatusEnabled = true;
+      sprite.onWorkTick(null, -1); // 先按空闲收尾：收起气泡、正在循环的工作动画改成播完即停
+    }
+    sprite.pet.workStatusEnabled = pet.workStatusEnabled;
   }
   animationConfigVersion = version;
 }
