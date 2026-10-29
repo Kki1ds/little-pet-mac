@@ -7,7 +7,7 @@
  *
  * 本文件钉三件事：
  *   ① 检测程序输出的解析：格式不对时不得清空上一次结果；
- *   ② 判定：按舞台区（不含透明余量）与全屏屏的重叠；拖拽/菜单期间维持现状；
+ *   ② 判定：身体命中区一半以上落在全屏的屏上才藏（透明余量和舞台两侧不算）；拖拽/菜单期间维持现状；
  *   ③ 源码守卫：main.js 真的接了线，且藏起来时只动透明度与输入，不 hide()。
  *
  * 用 Node 内置 test runner（node:test），不引入任何 npm 依赖。
@@ -20,7 +20,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const helper = '../../runtime/electron-helper/';
-const { parseFullScreenLine, stageRect, shouldConceal } = require(helper + 'fullscreen-guard.js');
+const { parseFullScreenLine, bodyRect, shouldConceal } = require(helper + 'fullscreen-guard.js');
 
 const readSource = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
@@ -60,22 +60,28 @@ describe('shouldConceal —— 哪只宠物该藏', () => {
     assert.equal(shouldConceal({ bounds: at(200, 200), margin, displays, busy: false, concealed: false }), false);
   });
 
-  test('只有透明余量伸进全屏屏时不藏（气泡把余量撑大也不误藏）', () => {
-    // 窗口右边缘伸到 1600（越过 1512），舞台区右边缘 = 1000+100+400 = 1500，仍在主屏
-    const bounds = { x: 1000, y: 200, width: 600, height: 425 };
+  // margin {l:100,t:100,size:400} 时身体框 = 窗口 x+225..x+375（宽 150）、y+150..y+328.125
+  test('bodyRect：身体命中区 = 舞台中间那一块', () => {
+    assert.deepEqual(bodyRect({ x: 0, y: 0, width: 600, height: 425 }, margin), { x: 225, y: 150, width: 150, height: 178.125 });
+  });
+
+  test('整个身子在外接屏左缘时，主屏全屏不藏它（舞台框伸进主屏也不算，真机验收的误藏）', () => {
+    const bounds = at(1300, 200); // 舞台 1400..1800 跨过 1512，身体 1525..1675 全在外接屏
+    assert.equal(shouldConceal({ bounds, margin, displays: [main], busy: false, concealed: false }), false);
+    assert.equal(shouldConceal({ bounds, margin, displays: [external], busy: false, concealed: false }), true);
+  });
+
+  test('身体跨在交界上时跟着大半个身子走', () => {
+    const bounds = at(1512 - 100 - 225, 200); // 身体 1412..1562：100 点在主屏，50 点在外接屏
+    assert.equal(shouldConceal({ bounds, margin, displays: [main], busy: false, concealed: false }), true);
     assert.equal(shouldConceal({ bounds, margin, displays: [external], busy: false, concealed: false }), false);
-    // 没有余量信息时按整窗判
-    assert.equal(shouldConceal({ bounds, displays: [external], busy: false, concealed: false }), true);
+    assert.equal(shouldConceal({ bounds, margin, displays: [main, external], busy: false, concealed: false }), true);
   });
 
   test('拖拽/菜单期间维持现状', () => {
     const displays = [external];
     assert.equal(shouldConceal({ bounds: at(2000, 200), margin, displays, busy: true, concealed: false }), false);
     assert.equal(shouldConceal({ bounds: at(200, 200), margin, displays, busy: true, concealed: true }), true);
-  });
-
-  test('stageRect：舞台区 = 窗口 + 余量偏移，16:9', () => {
-    assert.deepEqual(stageRect({ x: 10, y: 20, width: 600, height: 425 }, margin), { x: 110, y: 120, width: 400, height: 225 });
   });
 });
 

@@ -470,7 +470,7 @@ const offBodyMs = new Map();
 
 // ---------- 全屏避让（macOS）：别的应用全屏时，落在那块屏上的宠物变全透明 + 整窗穿透 ----------
 // 检测交给原生小程序 macos/fullscreen-watch（build_macos.py 编译进 app），它在结果变化时输出一行 JSON；
-// 本进程按宠物舞台区与这些屏的重叠逐窗判定。只动 alpha 与输入，不 hide()：渲染、计时、位置都照旧，
+// 本进程逐窗看宠物身体有没有一半以上落在这些屏上。只动 alpha 与输入，不 hide()：渲染、计时、位置都照旧，
 // 也不碰 Cmd+Q 临时隐藏（那条走宿主，整个 helper 退出）和仅菜单栏模式（客户端自己的 Dock 图标）。
 // DSH_PET_FULLSCREEN_YIELD=0 关闭；没有检测程序（开发流没编译）时只记一条日志，宠物照常显示。
 let fullScreenDisplays = [];

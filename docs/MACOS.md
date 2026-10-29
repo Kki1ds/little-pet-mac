@@ -19,7 +19,7 @@ python3 tools/macos/build_macos.py
 - 默认只在菜单栏显示（Info.plist 设 `LSUIElement`），Dock 里没有图标。点菜单栏图标可打开控制台、全部开启/隐藏或退出。
 - 控制台「在 Dock 栏显示图标」开关（或菜单栏菜单里的同名勾选项）可以把 Dock 图标加回来，设置存在 `~/.dsh/pet-control-client/mac-settings.json`，立即生效。
 - 每个角色是一个独立的 Helper 进程，始终不在 Dock 显示。
-- 全屏让位：别的应用进入全屏（看视频、演示、游戏、窗口全屏）时，在那块屏上的桌宠会变成全透明且鼠标穿透，退出全屏后恢复；另一块屏上的桌宠不受影响。检测由 `dsh-pet/runtime/electron-helper/macos/fullscreen-watch.c`（构建时编译进 app）每 0.8 秒读一次窗口列表完成，只看窗口位置、层级和所属进程，不需要屏幕录制权限；判定方法与白龙桌宠相同（盖满整块屏的普通窗口 = 全屏，系统进程除外）。拖拽、菜单或对话框开着时先不藏，松手或关掉后再判。设环境变量 `DSH_PET_FULLSCREEN_YIELD=0` 可关闭。
+- 全屏让位：别的应用进入全屏（看视频、演示、游戏、窗口全屏）时，身体一半以上在那块屏上的桌宠会变成全透明且鼠标穿透（透明边缘伸过去不算），退出全屏后恢复；另一块屏上的桌宠不受影响。检测由 `dsh-pet/runtime/electron-helper/macos/fullscreen-watch.c`（构建时编译进 app）每 0.8 秒读一次窗口列表完成，只看窗口位置、层级和所属进程，不需要屏幕录制权限；判定方法与白龙桌宠相同（盖满整块屏的普通窗口 = 全屏，系统进程除外）。拖拽、菜单或对话框开着时先不藏，松手或关掉后再判。设环境变量 `DSH_PET_FULLSCREEN_YIELD=0` 可关闭。
 - 上游的 `android/`（安卓版源码和素材）以及黑毛小狐狸（`characters/character5`）、奶茶千金（`characters/character6`）不保留在本仓库；以后合并上游新版本时，这些路径出现冲突就 `git rm -r` 掉。
 - 新版本带来的官方新动作会补进已安装的角色：动作名加到 `config.json` 的同一列表；位置、大小、显示状态、分身和自制动作不动。已经提供过的动作记在 `~/.dsh/pet-control-client/offered-actions.json`，您删掉的不会再被加回来。`main` 不参与（配置在 `main-config.jsonc`）。
 - 在某个角色身上按 Cmd+Q 只会暂时隐藏它（控制台开关同步变为隐藏）；下次启动应用会自动恢复，也可以随时在控制台重新开启。记录在 `~/.dsh/pet-control-client/quick-hidden.json`。

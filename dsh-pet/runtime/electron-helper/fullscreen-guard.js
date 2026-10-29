@@ -17,15 +17,14 @@
 
 'use strict';
 
+const { spriteHitRect } = require('./pointer-target.js');
+
 /** 原生检测程序的轮询间隔（ms，与白龙桌宠 FullScreenGuard 一致） */
 const FULLSCREEN_POLL_MS = 800;
 
 /** 检测程序意外退出后的重启等待（ms）与次数上限；用完就放弃避让，宠物保持可见 */
 const FULLSCREEN_RESTART_MS = 5000;
 const FULLSCREEN_MAX_RESTARTS = 3;
-
-/** 宠物画布宽高比（renderer 的 640×360 舞台） */
-const STAGE_RATIO = 360 / 640;
 
 /**
  * 解析检测程序的一行输出 → [{x,y,width,height}]；格式不对返回 null（调用方保持上一次结果）。
@@ -49,23 +48,26 @@ function parseFullScreenLine(line) {
 }
 
 /**
- * 判定用的宠物矩形：窗口内的舞台区（去掉四周透明余量）。
- * 余量会随气泡/菜单变大；用整窗判定的话，宠物站在屏幕交界附近一冒气泡就会被误藏。
+ * 判定用的宠物矩形：身体命中区（与点击判定同一个框，见 pointer-target.js）。
+ * 不能用整窗或整个 16:9 舞台：两侧大片透明，宠物整个站在外接屏左缘时舞台框仍会伸进主屏，
+ * 主屏一全屏就把它误藏（真机验收实测，离交界约 130 点）。
  * @param {{x:number,y:number,width:number,height:number}} bounds 窗口内容区（屏幕坐标）
  * @param {{l:number,t:number,size:number}|undefined} margin 渲染端上报的余量
  */
-function stageRect(bounds, margin) {
-  if (!margin || !(margin.size > 0)) return bounds;
-  return { x: bounds.x + margin.l, y: bounds.y + margin.t, width: margin.size, height: margin.size * STAGE_RATIO };
+function bodyRect(bounds, margin) {
+  const r = spriteHitRect(bounds, margin);
+  return { x: r.left, y: r.top, width: r.right - r.left, height: r.bottom - r.top };
 }
 
-/** 两个矩形是否有面积重叠（只擦边不算） */
-function overlaps(a, b) {
-  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+/** 两个矩形重叠的面积 */
+function overlapArea(a, b) {
+  const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? w * h : 0;
 }
 
 /**
- * 这只宠物该不该藏起来。
+ * 这只宠物该不该藏起来：身体有一半以上落在全屏的屏上才藏（跨在交界上时跟着大半个身子走）。
  * 渲染端正拿着鼠标输入（拖拽 / 菜单 / 对话框）时维持现状、不翻转：拖到一半整窗穿透会把松手
  * 事件丢掉，宠物会按旧速度飞走；输入结束后（pet:input-busy=false）立刻补判一次。
  * @param {{bounds:object, margin?:object, displays:object[], busy:boolean, concealed:boolean}} state
@@ -74,8 +76,11 @@ function shouldConceal(state) {
   const { bounds, margin, displays, busy, concealed } = state || {};
   if (busy) return !!concealed;
   if (!bounds || !Array.isArray(displays) || !displays.length) return false;
-  const rect = stageRect(bounds, margin);
-  return displays.some((d) => overlaps(rect, d));
+  const body = bodyRect(bounds, margin);
+  const area = body.width * body.height;
+  if (!(area > 0)) return false;
+  // 全屏的屏互不重叠，面积可以直接相加
+  return displays.reduce((sum, d) => sum + overlapArea(body, d), 0) * 2 > area;
 }
 
 module.exports = {
@@ -83,6 +88,6 @@ module.exports = {
   FULLSCREEN_RESTART_MS,
   FULLSCREEN_MAX_RESTARTS,
   parseFullScreenLine,
-  stageRect,
+  bodyRect,
   shouldConceal,
 };
