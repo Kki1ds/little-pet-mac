@@ -26,6 +26,7 @@ python3 tools/macos/build_macos.py
 - 应用菜单提供编辑快捷键（Cmd+C/V/A）；控制台在前台时 Cmd+Q 关闭全部桌宠；开启 Dock 图标时点它也能重新打开控制台。
 - 菜单栏图标是从应用图标裁出的彩色小克头像 `client/assets/trayColor.png`（+ `@2x`，26×18pt），由 `tools/macos/tray-icon/make_color_tray_icon.py` 生成。备选的黑白模板剪影 `trayTemplate.png` 由 `make_tray_icon.py` 生成，换回时在 `client/main.cjs` 改文件名并加 `setTemplateImage(true)`。
 - AI 密钥用 Electron safeStorage 保存，在 macOS 上由钥匙串加密，首次保存可能弹出钥匙串授权。
+- 桌宠不会阻止显示器息屏或系统睡眠。Chromium 默认会给铺满窗口的播放中视频加 Video Wake Lock（静音也加），宠物页和控制台都在 window 捕获阶段截住 video 的 `playing` 事件来避开它。运行时用 `pmset -g assertions` 检查，不应再看到 `Video Wake Lock`。
 - `client/verify.cjs`（PowerShell 窗口检查）只适用于 Windows，未打包进 macOS 版。
 
 ## Claude Code 工作状态

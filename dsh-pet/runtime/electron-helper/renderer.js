@@ -24,6 +24,20 @@
  */
 'use strict';
 
+// ---------- 不阻止息屏/睡眠 ----------
+// Chromium 对「正在播放、可见、占视口 20% 以上」的 <video> 会自动申请 Video Wake Lock（macOS 上是
+// PreventUserIdleDisplaySleep 断言），静音也照样申请；宠物视频几乎铺满自己的小窗，于是每个宠物进程
+// 都会让显示器永不息屏、系统也不会闲置睡眠。这把锁只在收到 video 的 playing 事件后才申请，故在 window
+// 捕获阶段截住它，播放本身不受影响（本页没有别的 playing 监听）。验证：pmset -g assertions 里不再有
+// "Video Wake Lock"。
+window.addEventListener(
+  'playing',
+  (event) => {
+    if (event.target instanceof HTMLVideoElement) event.stopImmediatePropagation();
+  },
+  true,
+);
+
 // ---------- 配置（大声报错；失败 5s 重试） ----------
 function showError(message) {
   console.error('[dsh-pet] ' + message);
