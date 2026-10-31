@@ -14,6 +14,8 @@ const CONFIG = {
   scale: Number(params.get('scale') || '1'),
   petIndex: Number(params.get('petIndex') || '0'),
   petId: params.get('petId') || '',
+  // 共用进程模式（macOS 默认）：一个 helper 装下全部宠物、每只一个窗口，宠物名单变了由主进程增删窗口
+  shared: params.get('shared') === '1',
   topInsetRatio: Number(params.get('topInsetRatio') || '0'),
 };
 

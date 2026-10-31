@@ -254,6 +254,8 @@ function applyAnimLeaf(petId, leaf) {
 let animationConfigVersion = null;
 async function refreshAnimationConfig(version) {
   if (!version || version === animationConfigVersion) return;
+  // 共用进程模式：知会主进程配置变了，由它向宿主拉名单、增删/重建窗口（每个窗口都会知会，主进程去重）
+  if (CONFIG.shared && window.petBridge && window.petBridge.sharedConfigChanged) window.petBridge.sharedConfigChanged(String(version));
   const response = await fetch(BASE + '/config', { cache: 'no-store' });
   if (!response.ok) throw new Error('animation config http ' + response.status);
   const pets = S.flattenConfigPets(await response.json());

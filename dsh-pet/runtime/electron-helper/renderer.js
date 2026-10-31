@@ -84,6 +84,8 @@ async function boot() {
       scheduleReboot();
       return;
     }
+    // 共用进程模式第一次启动：先把每宠一进程时存下的位置导进来，宠物才能出现在老地方
+    if (CONFIG.shared) await importLegacyPositions();
     // 本窗口只承载一只宠物：petIndex 由主进程按 DSH_PET_PETS 顺序注入
     const pet = CONFIG.petId ? pets.find((entry) => entry.id === CONFIG.petId) : pets[CONFIG.petIndex];
     if (!pet) {
@@ -148,6 +150,100 @@ window.addEventListener('resize', () => {
     s.position();
   }
 });
+
+// ---------- 共用进程模式：导入每宠一进程时的位置 ----------
+// 每宠一进程时各宠物的位置存在各自 helper 的 profile 里（localStorage，键 dsh-pet-position:<id>）；
+// 共用进程模式用自己的 profile，第一次启动时主进程把旧位置读出来，这里补进本 profile（已有记录的不覆盖）。
+// 同一 profile 的窗口共用 localStorage，哪个窗口先导入都一样；导完打标记，之后不再导。
+async function importLegacyPositions() {
+  const MARK = 'dsh-pet-legacy-positions-imported';
+  try {
+    if (localStorage.getItem(MARK) || !window.petBridge || !window.petBridge.legacyPositions) return;
+    const legacy = await window.petBridge.legacyPositions();
+    for (const [id, pos] of Object.entries((legacy && legacy.positions) || {})) {
+      const key = 'dsh-pet-position:' + id;
+      if (localStorage.getItem(key) === null && pos && Number.isFinite(pos.rx) && Number.isFinite(pos.ry)) {
+        localStorage.setItem(key, JSON.stringify({ rx: pos.rx, ry: pos.ry }));
+      }
+    }
+    // 有旧 profile 没读成（比如旧进程还没退干净）就不打标记，下次启动再试
+    if (legacy && legacy.complete) localStorage.setItem(MARK, String(Date.now()));
+  } catch (error) {
+    console.warn('[dsh-pet] legacy positions import failed:', error);
+  }
+}
+
+// ---------- 帧率探针（tools/macos/measure_pets.py 经主进程触发；平时不跑） ----------
+// 限时跑一个 rAF 记帧间隔（主线程或合成卡住时间隔会变长），并统计各视频的丢帧数；
+// 两种进程模式同一套口径，结束后交主进程写进 ~/.dsh/pet-control-client/frame-probe/。
+let frameProbeId = '';
+if (window.petBridge && window.petBridge.onFrameProbe) {
+  window.petBridge.onFrameProbe((req) => {
+    if (!req || typeof req.id !== 'string' || !req.id || req.id === frameProbeId) return;
+    frameProbeId = req.id;
+    runFrameProbe(req.id, Math.min(Math.max(Number(req.ms) || 0, 1000), 300000));
+  });
+}
+
+/** 各视频的丢帧/总帧累计（计数器在片源重载时归零：读数变小就从新的读数接着加） */
+function videoCounter() {
+  const last = new Map();
+  const sum = { dropped: 0, total: 0 };
+  const sample = () => {
+    for (const s of sprites) {
+      for (const v of [s.videoA, s.videoB]) {
+        const q = v && typeof v.getVideoPlaybackQuality === 'function' ? v.getVideoPlaybackQuality() : null;
+        if (!q) continue;
+        const prev = last.get(v);
+        if (prev) {
+          sum.dropped += q.droppedVideoFrames >= prev.dropped ? q.droppedVideoFrames - prev.dropped : q.droppedVideoFrames;
+          sum.total += q.totalVideoFrames >= prev.total ? q.totalVideoFrames - prev.total : q.totalVideoFrames;
+        }
+        last.set(v, { dropped: q.droppedVideoFrames, total: q.totalVideoFrames });
+      }
+    }
+    return sum;
+  };
+  sample();
+  return sample;
+}
+
+function runFrameProbe(id, ms) {
+  const sampleVideo = videoCounter();
+  const gaps = [];
+  const t0 = performance.now();
+  let last = 0;
+  const step = (now) => {
+    if (last) gaps.push(now - last);
+    last = now;
+    if (gaps.length % 6 === 0) sampleVideo();
+    if (now - t0 < ms) {
+      requestAnimationFrame(step);
+      return;
+    }
+    const video = sampleVideo();
+    const sorted = gaps.slice().sort((a, b) => a - b);
+    const at = (p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] : 0);
+    const p50 = at(0.5);
+    const round = (x) => Math.round(x * 10) / 10;
+    window.petBridge.frameProbeResult({
+      id,
+      mode: CONFIG.shared ? 'shared' : 'per-pet',
+      pets: sprites.map((s) => s.pet.id),
+      seconds: round((performance.now() - t0) / 1000),
+      frames: gaps.length,
+      p50: round(p50),
+      p95: round(at(0.95)),
+      p99: round(at(0.99)),
+      max: round(sorted.length ? sorted[sorted.length - 1] : 0),
+      // 一帧拖成两帧以上算一次卡顿
+      hitches: gaps.filter((g) => g > p50 * 1.8).length,
+      videoDropped: video.dropped,
+      videoTotal: video.total,
+    });
+  };
+  requestAnimationFrame(step);
+}
 
 injectAssets();
 void boot();

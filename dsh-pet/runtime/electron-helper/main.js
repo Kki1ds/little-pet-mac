@@ -77,7 +77,17 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.setName('dsh-pet-electron-helper');
 // macOS：每个角色一个 Helper 进程，不隐藏的话每开一个角色 Dock 栏就多一个图标。
 if (process.platform === 'darwin') app.dock?.hide();
-if (process.env.DSH_PET_INSTANCE_ID) {
+/**
+ * 共用进程模式（宿主经 DSH_PET_SHARED=1 打开，目前只有 macOS 宿主会开）：本进程装下全部桌面宠物，
+ * 每只仍是自己的小窗口；宠物名单变了就地增删窗口（详见 shared-helper.js 头部）。
+ * 不设时每只宠物一个 helper（宿主按 DSH_PET_PETS 给的那一只建窗口）。
+ */
+const SHARED = process.env.DSH_PET_SHARED === '1' && process.env.DSH_PET_DPI_PROBE !== '1';
+const sharedHelper = require('./shared-helper.js');
+if (SHARED) {
+  // 独立的 profile：每宠一进程的旧 profile 原样留着（切回去时位置还在），旧位置只读不写
+  app.setPath('userData', path.join(app.getPath('appData'), sharedHelper.SHARED_PROFILE));
+} else if (process.env.DSH_PET_INSTANCE_ID) {
   const instance = process.env.DSH_PET_INSTANCE_ID.replace(/[^a-zA-Z0-9_-]/g, '_');
   app.setPath('userData', path.join(app.getPath('appData'), 'dsh-pet-character-' + instance));
 }
@@ -403,11 +413,19 @@ function linkCollision(petId, win) {
     onStatus: connected => log?.record('碰撞通信状态', { connected }),
   });
   collisionLinks.set(petId, link);
-  win.once('closed', () => { link.close(); collisionLinks.delete(petId); });
+  win.once('closed', () => {
+    link.close();
+    if (collisionLinks.get(petId) === link) collisionLinks.delete(petId);
+  });
 }
 
-/** 把当前全量宠物状态广播给所有窗口（碰撞检测的共享站场） */
+/**
+ * 把当前全量宠物状态广播给所有窗口（碰撞检测的共享站场）。
+ * 共用进程模式不广播：碰撞已由控制台的 broker 统一算（collision-link.cjs，每宠一进程时也只有它），
+ * 再让同进程的窗口互相看见，同一次碰撞会被页面和 broker 各算一遍、撞飞两次。
+ */
 function broadcastPetStates() {
+  if (SHARED) return;
   const states = {};
   for (const [pid, s] of petStates) {
     states[pid] = { x: s.x, y: s.y, vx: s.vx, vy: s.vy, size: s.size, bottomPad: s.bottomPad };
@@ -547,6 +565,43 @@ function startFullScreenWatch() {
   });
 }
 
+// ---------- 帧率探针：tools/macos/measure_pets.py 写请求文件，页面限时统计帧间隔与视频丢帧 ----------
+// 平时只有一个每秒一次的 stat（fs.watchFile），不跑任何渲染端逻辑。两种进程模式同一套口径，
+// 结果按页面（一只宠物一个）写进 frame-probe/pet-<id>.json，测量脚本据此对比两种模式的卡顿。
+function startFrameProbeWatch() {
+  const dir = path.join(process.env.DSH_HOME || path.join(app.getPath('home'), '.dsh'), 'pet-control-client');
+  const request = path.join(dir, 'frame-probe-request.json');
+  // 一个文件一个页面（共用进程模式一个 helper 里有好几个页面）
+  const fileFor = (result) =>
+    ('pet-' + String(result.pets?.[0] ?? process.env.DSH_PET_INSTANCE_ID ?? 'main')).replace(/[^a-zA-Z0-9_-]/g, '_');
+  let lastId = '';
+  const check = () => {
+    let req;
+    try {
+      req = JSON.parse(readFileSync(request, 'utf8'));
+    } catch {
+      return;
+    }
+    const ms = Number(req?.until) - Date.now();
+    if (typeof req?.id !== 'string' || !req.id || req.id === lastId || !(ms > 1000)) return;
+    lastId = req.id;
+    for (const win of windows.values()) if (!win.isDestroyed()) win.webContents.send('pet:frame-probe', { id: req.id, ms });
+  };
+  const { watchFile, unwatchFile, mkdirSync } = require('node:fs');
+  watchFile(request, { interval: 1000 }, check);
+  app.on('will-quit', () => unwatchFile(request));
+  ipcMain.on('pet:frame-probe-result', (_event, result) => {
+    if (!result || typeof result.id !== 'string') return;
+    try {
+      mkdirSync(path.join(dir, 'frame-probe'), { recursive: true });
+      const name = fileFor(result);
+      writeFileSync(path.join(dir, 'frame-probe', name + '.json'), JSON.stringify({ ...result, page: name, at: Date.now() }));
+    } catch (error) {
+      console.error('[dsh-pet-desktop-helper] frame probe result:', error.message);
+    }
+  });
+}
+
 /**
  * 桌面宠物列表（[{id,size}]）：宿主经 DSH_PET_PETS 透传（每只宠物一个窗口）。
  * 解析失败/未透传（手动 start-desktop）时回落到单个默认宠物窗口；renderer 首帧发来的
@@ -591,166 +646,267 @@ function deskGeometry() {
   return buildDeskGeometry(screen.getAllDisplays(), screen.getPrimaryDisplay().id, process.platform);
 }
 
+/** Windows：不可见的原生 owner 窗口，压掉任务栏条目且不抢对话焦点（第一只宠物建窗时才建） */
+let taskbarOwner;
+/** petId -> 建窗时的宠物信息 {id, name, size, assetRoot}（共用进程模式按它比对新名单） */
+const petInfo = new Map();
+
 function createPetWindows() {
+  for (const pet of petsFromEnv()) createPetWindow(pet);
+}
+
+/** 给一只宠物建窗口。共用进程模式下名单变了也走这里（几何与缩放按建窗当时的取） */
+function createPetWindow(pet) {
   const geo = deskGeometry();
   const area = geo.hull;
   const configUrl = process.env.DSH_PET_CONFIG_URL || 'http://127.0.0.1:3080/dsh-pet-7340/config';
-  const pets = petsFromEnv();
   const scale = petScale();
-  // Invisible native owner suppresses Windows taskbar entries, preserving chat focus.
-  const taskbarOwner = process.platform === 'win32' && pets.length
-    ? new BrowserWindow({ show: false, width: 1, height: 1, frame: false, skipTaskbar: true, focusable: false })
-    : undefined;
-  for (const pet of pets) {
-    // 初始窗口尺寸也要吃缩放补偿，否则启动瞬间会有一次可见的尺寸跳变
-    const { width, height } = petWindowSize(pet.size * scale);
-    const win = new BrowserWindow({
-      // Mission Control and the window list show the character's own name.
-      title: pet.name || pet.id,
-      parent: taskbarOwner,
-      width,
-      height,
-      x: area.x, // 初始左上角；renderer 首帧按配置角落/位置校正
-      y: area.y,
-      show: false,
-      useContentSize: true,
-      // macOS 默认会把已显示窗口的 y 钳到菜单栏下沿；局部画布的透明余量必须允许伸出屏幕。
-      enableLargerThanScreen: true,
-      transparent: true,
-      frame: false,
-      alwaysOnTop: true,
-      skipTaskbar: true,
-      resizable: false,
-      hasShadow: false,
-      // 可聚焦：对话输入框/菜单需要窗口焦点才能打字（focusable:false 会让输入框永远无法聚焦）。
-      // 显示时使用 showInactive()，不打断其它应用；用户主动点对话输入框时仍然允许获得焦点。
-      focusable: true,
-      webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: false,
-        paintWhenInitiallyHidden: false,
-        spellcheck: false,
-      },
-    });
-    win.on('page-title-updated', (event) => event.preventDefault());
-    // 启动或重新显示时若已在别的应用全屏中，先藏好再说（不等下一次移动）
-    win.on('show', () => guardFullScreen(win));
-    win.setAlwaysOnTop(true, 'screen-saver');
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    // 窗口被其他窗口（另一只宠物）完全遮挡时，Chromium 默认会暂停本窗口渲染，
-    // 导致大宠物移动盖过小宠物时小宠物显示为"消失"。关闭后台节流，让被遮挡
-    // 窗口持续渲染，移开遮挡后立刻恢复显示。
-    win.webContents.setBackgroundThrottling(false);
-    // 屏蔽 Electron 默认右键菜单：右键菜单由渲染端统一自绘组件弹出（两端一致），绝无双菜单
-    win.webContents.on('context-menu', (event) => event.preventDefault());
-    // 页面级缩放 = petScale()（渲染端 CONFIG.scale 的同一来源）：整窗内容统一放大，渲染端坐标系
-    // 回到 CSS 像素——右键菜单/积分弹窗/聊天框等固定 px UI 随之恢复 DIP 观感，不再逐处补偿
-    // （见 DESIGN.md §3.5；跨进程交换仍走物理像素，由渲染端 toScreen/toLocal 收口）。
-    // webPreferences.zoomFactor 对 show:false 的窗口不生效（实测），须在加载完成后设置。
-    win.webContents.on('did-finish-load', () => {
-      win.webContents.setZoomFactor(scale);
-    });
-    // 默认整窗点击穿透（renderer 在光标进/出身体命中区时经 IPC 翻转可交互）；
-    // forward:true 保证穿透期间 mousemove 仍转发进渲染端做命中判定。
-    setWindowIgnore(win, true);
-    win.once('ready-to-show', () => win.showInactive());
-    // [#55 兜底显示] paintWhenInitiallyHidden:false 时渲染器可能不产出首帧，ready-to-show 便永不触发
-    // （Electron 文档原文：ready-to-show "will never fire if you use paintWhenInitiallyHidden: false"），
-    // 而 show() 只挂在它上面 → 窗口永远隐藏（进程活着、宠物逻辑照跑，桌面上什么都没有）。
-    // 页面加载完成后强制兜底一次；zoomFactor 的设置在更早注册的 did-finish-load 里，顺序不受影响。
-    win.webContents.once('did-finish-load', () => {
-      setTimeout(() => {
-        if (!win.isDestroyed() && !win.isVisible()) win.showInactive();
-      }, 400);
-    });
-    // [#55 兜底交互] 上面的翻转链路只有「Electron forward 鼠标钩子 → 渲染端命中判定」一个入口，
-    // 该钩子在 Windows 上可能静默失效（回调超时被系统摘掉 / 被别的软件钩子干扰）→ 光标悬浮无反应、
-    // 拖不动、点击与右键全废。这里由主进程按**真实光标位置**独立判定，不依赖那条转发链路：
-    // 与 renderer 那条通道并存且判定区域一致（状态未变不翻转），转发正常的环境行为完全不变。
-    //
-    // 唯一不可自行决定的事：**渲染端正拿着鼠标输入时不得翻回穿透**（见 inputBusy）。
-    // 本进程无从判断这件事——光看光标位置与窗口位移分不清"拖拽跟手"和"漫游/抛掷"，所以由渲染端上报。
-    const pointerTimer = setInterval(() => {
-      if (pointerFallbackPaused || win.isDestroyed()) return;
-      const b = win.getBounds();
-      if (b.width < 8 || b.height < 8) return; // 尺寸还没落定（renderer 首帧上报前）
-      const ignoring = windowIgnore.get(win.id) !== false;
-      const busy = inputBusy.get(win.id) === true;
-      const point = screen.getCursorScreenPoint();
-      // 余量区停留计时：只在"非 busy 且在余量区"时累加，离开余量区即清零；busy 期间不累加。
-      const margin = petMargins.get(win.id);
-      const zone = pointerZone(b, point, margin);
-      const nextMs = !busy && zone === 'margin' ? (offBodyMs.get(win.id) ?? 0) + POINTER_POLL_MS : 0;
-      offBodyMs.set(win.id, nextMs);
-      const next = decideWindowIgnore(b, point, ignoring, busy, nextMs, inputRegions.get(win.id), margin);
-      if (next !== ignoring) setWindowIgnore(win, next);
-    }, POINTER_POLL_MS);
-    // [置顶看门狗] 建窗时那次 setAlwaysOnTop 之后再没人复查过：外部任何一次 z 序扰动都能让桌宠
-    // 沉到普通窗下面——而 `WS_EX_TOPMOST` 位还在（点击穿透的读-改-写会把它写回来），于是
-    // "是不是置顶"永远查得出 true、宠物却再也看不见，用户侧只能重启 helper 才回来。
-    // 这里低频重钉一次：落地就是 SetWindowPos(HWND_TOPMOST, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)，
-    // 不移动、不重绘、不抢焦点（判定的纯逻辑与全部依据见 topmost-watchdog.js）。
-    let lastTopmostAssertMs = Date.now();
-    const topmostTimer = setInterval(() => {
-      const nowMs = Date.now();
-      const due = shouldReassertTopmost({
-        nowMs,
-        lastAssertMs: lastTopmostAssertMs,
-        destroyed: win.isDestroyed(),
-        visible: win.isVisible(),
-        paused: pointerFallbackPaused,
-      });
-      if (!due) return;
-      lastTopmostAssertMs = nowMs;
-      win.setAlwaysOnTop(true, 'screen-saver');
-    }, TOPMOST_WATCHDOG_TICK_MS);
-    win.on('closed', () => {
-      clearInterval(pointerTimer);
-      clearInterval(topmostTimer);
-      windows.delete(pet.id);
-      if (!windows.size && taskbarOwner && !taskbarOwner.isDestroyed()) taskbarOwner.destroy();
-      lastRequestedBounds.delete(win.id);
-      petMargins.delete(win.id);
-      windowIgnore.delete(win.id);
-      fullScreenConcealed.delete(win.id);
-      inputBusy.delete(win.id);
-      inputRegions.delete(win.id);
-      offBodyMs.delete(win.id);
-    });
-    win
-      .loadFile(path.join(__dirname, 'index.html'), {
-        query: {
-          configUrl,
-          bridge: BRIDGE ? '1' : '0',
-          // 工具项「打开网站」的文案按宿主形态自动变（见 sprite.js）：desktop=唤起桌面应用 / site=打开站点
-          openTarget: OPEN_TARGET,
-          scale: String(scale),
-          petIndex: String(pet.index),
-          petId: pet.id,
-          workAreaW: String(area.width),
-          workAreaH: String(area.height),
-          workAreaX: String(area.x),
-          workAreaY: String(area.y),
-          // 逐屏工作区（屏幕坐标）+ 主屏下标：渲染端所有边界判定走它们的并集，不走外接矩形。
-          // 首帧就要用（position() 定角落），所以走 query；运行期变化再经 pet:displays 推送。
-          areas: JSON.stringify(geo.areas),
-          workAreas: JSON.stringify(geo.workAreas),
-          topInsetRatio: String(geo.topInsetRatio),
-          // 逐屏完整面板（含任务栏区）：抛掷越界侧探测用（任务栏条带不当墙，见 shared/physics.ts）
-          panels: JSON.stringify(geo.panels),
-          primaryIndex: String(geo.primaryIndex),
-        },
-      })
-      .catch((error) => {
-        console.error(`[dsh-pet-desktop-helper] page load failed (${pet.id}):`, error);
-        win.destroy();
-      });
-    windows.set(pet.id, win);
-    attachRoleLog(win, pet);
-    linkCollision(pet.id, win);
+  if (process.platform === 'win32' && (!taskbarOwner || taskbarOwner.isDestroyed())) {
+    taskbarOwner = new BrowserWindow({ show: false, width: 1, height: 1, frame: false, skipTaskbar: true, focusable: false });
   }
+  // 初始窗口尺寸也要吃缩放补偿，否则启动瞬间会有一次可见的尺寸跳变
+  const { width, height } = petWindowSize(pet.size * scale);
+  const win = new BrowserWindow({
+    // Mission Control and the window list show the character's own name.
+    title: pet.name || pet.id,
+    parent: taskbarOwner,
+    width,
+    height,
+    x: area.x, // 初始左上角；renderer 首帧按配置角落/位置校正
+    y: area.y,
+    show: false,
+    useContentSize: true,
+    // macOS 默认会把已显示窗口的 y 钳到菜单栏下沿；局部画布的透明余量必须允许伸出屏幕。
+    enableLargerThanScreen: true,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    hasShadow: false,
+    // 可聚焦：对话输入框/菜单需要窗口焦点才能打字（focusable:false 会让输入框永远无法聚焦）。
+    // 显示时使用 showInactive()，不打断其它应用；用户主动点对话输入框时仍然允许获得焦点。
+    focusable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      paintWhenInitiallyHidden: false,
+      spellcheck: false,
+    },
+  });
+  win.on('page-title-updated', (event) => event.preventDefault());
+  // 启动或重新显示时若已在别的应用全屏中，先藏好再说（不等下一次移动）
+  win.on('show', () => guardFullScreen(win));
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // 窗口被其他窗口（另一只宠物）完全遮挡时，Chromium 默认会暂停本窗口渲染，
+  // 导致大宠物移动盖过小宠物时小宠物显示为"消失"。关闭后台节流，让被遮挡
+  // 窗口持续渲染，移开遮挡后立刻恢复显示。
+  win.webContents.setBackgroundThrottling(false);
+  // 屏蔽 Electron 默认右键菜单：右键菜单由渲染端统一自绘组件弹出（两端一致），绝无双菜单
+  win.webContents.on('context-menu', (event) => event.preventDefault());
+  // 页面级缩放 = petScale()（渲染端 CONFIG.scale 的同一来源）：整窗内容统一放大，渲染端坐标系
+  // 回到 CSS 像素——右键菜单/积分弹窗/聊天框等固定 px UI 随之恢复 DIP 观感，不再逐处补偿
+  // （见 DESIGN.md §3.5；跨进程交换仍走物理像素，由渲染端 toScreen/toLocal 收口）。
+  // webPreferences.zoomFactor 对 show:false 的窗口不生效（实测），须在加载完成后设置。
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.setZoomFactor(scale);
+  });
+  // 默认整窗点击穿透（renderer 在光标进/出身体命中区时经 IPC 翻转可交互）；
+  // forward:true 保证穿透期间 mousemove 仍转发进渲染端做命中判定。
+  setWindowIgnore(win, true);
+  win.once('ready-to-show', () => win.showInactive());
+  // [#55 兜底显示] paintWhenInitiallyHidden:false 时渲染器可能不产出首帧，ready-to-show 便永不触发
+  // （Electron 文档原文：ready-to-show "will never fire if you use paintWhenInitiallyHidden: false"），
+  // 而 show() 只挂在它上面 → 窗口永远隐藏（进程活着、宠物逻辑照跑，桌面上什么都没有）。
+  // 页面加载完成后强制兜底一次；zoomFactor 的设置在更早注册的 did-finish-load 里，顺序不受影响。
+  win.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      if (!win.isDestroyed() && !win.isVisible()) win.showInactive();
+    }, 400);
+  });
+  // [#55 兜底交互] 上面的翻转链路只有「Electron forward 鼠标钩子 → 渲染端命中判定」一个入口，
+  // 该钩子在 Windows 上可能静默失效（回调超时被系统摘掉 / 被别的软件钩子干扰）→ 光标悬浮无反应、
+  // 拖不动、点击与右键全废。这里由主进程按**真实光标位置**独立判定，不依赖那条转发链路：
+  // 与 renderer 那条通道并存且判定区域一致（状态未变不翻转），转发正常的环境行为完全不变。
+  //
+  // 唯一不可自行决定的事：**渲染端正拿着鼠标输入时不得翻回穿透**（见 inputBusy）。
+  // 本进程无从判断这件事——光看光标位置与窗口位移分不清"拖拽跟手"和"漫游/抛掷"，所以由渲染端上报。
+  const pointerTimer = setInterval(() => {
+    if (pointerFallbackPaused || win.isDestroyed()) return;
+    const b = win.getBounds();
+    if (b.width < 8 || b.height < 8) return; // 尺寸还没落定（renderer 首帧上报前）
+    const ignoring = windowIgnore.get(win.id) !== false;
+    const busy = inputBusy.get(win.id) === true;
+    const point = screen.getCursorScreenPoint();
+    // 余量区停留计时：只在"非 busy 且在余量区"时累加，离开余量区即清零；busy 期间不累加。
+    const margin = petMargins.get(win.id);
+    const zone = pointerZone(b, point, margin);
+    const nextMs = !busy && zone === 'margin' ? (offBodyMs.get(win.id) ?? 0) + POINTER_POLL_MS : 0;
+    offBodyMs.set(win.id, nextMs);
+    const next = decideWindowIgnore(b, point, ignoring, busy, nextMs, inputRegions.get(win.id), margin);
+    if (next !== ignoring) setWindowIgnore(win, next);
+  }, POINTER_POLL_MS);
+  // [置顶看门狗] 建窗时那次 setAlwaysOnTop 之后再没人复查过：外部任何一次 z 序扰动都能让桌宠
+  // 沉到普通窗下面——而 `WS_EX_TOPMOST` 位还在（点击穿透的读-改-写会把它写回来），于是
+  // "是不是置顶"永远查得出 true、宠物却再也看不见，用户侧只能重启 helper 才回来。
+  // 这里低频重钉一次：落地就是 SetWindowPos(HWND_TOPMOST, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)，
+  // 不移动、不重绘、不抢焦点（判定的纯逻辑与全部依据见 topmost-watchdog.js）。
+  let lastTopmostAssertMs = Date.now();
+  const topmostTimer = setInterval(() => {
+    const nowMs = Date.now();
+    const due = shouldReassertTopmost({
+      nowMs,
+      lastAssertMs: lastTopmostAssertMs,
+      destroyed: win.isDestroyed(),
+      visible: win.isVisible(),
+      paused: pointerFallbackPaused,
+    });
+    if (!due) return;
+    lastTopmostAssertMs = nowMs;
+    win.setAlwaysOnTop(true, 'screen-saver');
+  }, TOPMOST_WATCHDOG_TICK_MS);
+  win.on('closed', () => {
+    clearInterval(pointerTimer);
+    clearInterval(topmostTimer);
+    // 共用进程模式改大小时新窗口先登记、旧窗口后关：表里已经是新窗口就别删
+    if (windows.get(pet.id) === win) {
+      windows.delete(pet.id);
+      petInfo.delete(pet.id);
+    }
+    if (!windows.size && taskbarOwner && !taskbarOwner.isDestroyed()) taskbarOwner.destroy();
+    lastRequestedBounds.delete(win.id);
+    petMargins.delete(win.id);
+    windowIgnore.delete(win.id);
+    fullScreenConcealed.delete(win.id);
+    inputBusy.delete(win.id);
+    inputRegions.delete(win.id);
+    offBodyMs.delete(win.id);
+  });
+  win
+    .loadFile(path.join(__dirname, 'index.html'), {
+      query: {
+        configUrl,
+        bridge: BRIDGE ? '1' : '0',
+        // 工具项「打开网站」的文案按宿主形态自动变（见 sprite.js）：desktop=唤起桌面应用 / site=打开站点
+        openTarget: OPEN_TARGET,
+        scale: String(scale),
+        petIndex: String(pet.index ?? 0),
+        petId: pet.id,
+        shared: SHARED ? '1' : '0',
+        workAreaW: String(area.width),
+        workAreaH: String(area.height),
+        workAreaX: String(area.x),
+        workAreaY: String(area.y),
+        // 逐屏工作区（屏幕坐标）+ 主屏下标：渲染端所有边界判定走它们的并集，不走外接矩形。
+        // 首帧就要用（position() 定角落），所以走 query；运行期变化再经 pet:displays 推送。
+        areas: JSON.stringify(geo.areas),
+        workAreas: JSON.stringify(geo.workAreas),
+        topInsetRatio: String(geo.topInsetRatio),
+        // 逐屏完整面板（含任务栏区）：抛掷越界侧探测用（任务栏条带不当墙，见 shared/physics.ts）
+        panels: JSON.stringify(geo.panels),
+        primaryIndex: String(geo.primaryIndex),
+      },
+    })
+    .catch((error) => {
+      console.error(`[dsh-pet-desktop-helper] page load failed (${pet.id}):`, error);
+      win.destroy();
+    });
+  windows.set(pet.id, win);
+  petInfo.set(pet.id, pet);
+  attachRoleLog(win, pet);
+  linkCollision(pet.id, win);
+  return win;
+}
+
+/** 宿主的 /config（共用进程模式增删窗口的依据）：有 bridge 走 bridge（与页面同一条路），否则直连 HTTP */
+async function fetchHostConfig() {
+  const configUrl = process.env.DSH_PET_CONFIG_URL || 'http://127.0.0.1:3080/dsh-pet-7340/config';
+  if (BRIDGE) {
+    const resp = await bridgeRequest('GET', new URL(configUrl).pathname);
+    if ((resp.status || 200) !== 200) throw new Error('config http ' + resp.status);
+    return typeof resp.body === 'string' ? JSON.parse(resp.body) : resp.body;
+  }
+  const res = await fetch(configUrl, { cache: 'no-store' });
+  if (!res.ok) throw new Error('config http ' + res.status);
+  return res.json();
+}
+
+/** 按新名单增删/重建窗口（计划见 shared-helper.js 的 planSharedWindows） */
+function applySharedPets(wanted) {
+  const plan = sharedHelper.planSharedWindows([...petInfo.values()], wanted);
+  if (!plan.open.length && !plan.reopen.length && !plan.close.length) return;
+  console.error(
+    '[dsh-pet-desktop-helper] pets changed: ' +
+      JSON.stringify({ open: plan.open.map((p) => p.id), reopen: plan.reopen.map((p) => p.id), close: plan.close }),
+  );
+  // 先建新的再关旧的：改大小的那只若是唯一一只，先关会触发 window-all-closed 把整个进程退掉
+  for (const pet of plan.open) createPetWindow(pet);
+  for (const pet of plan.reopen) {
+    const old = windows.get(pet.id);
+    // broker 一个 id 只认一条连接：先断旧的，新窗口的连接才能马上接上（否则要等 1 秒重连）
+    collisionLinks.get(pet.id)?.close();
+    createPetWindow(pet);
+    if (old && !old.isDestroyed()) old.close();
+  }
+  for (const id of plan.close) {
+    const win = windows.get(id);
+    if (win && !win.isDestroyed()) win.close();
+  }
+}
+
+/**
+ * 共用进程模式：页面发现配置版本变了就知会这里（每个窗口都会知会一次）→ 向宿主拉 /config → 增删窗口。
+ * 名单只信宿主：各页面的知会可能乱序到达，拿页面手里的名单会被慢一拍的旧名单改回去。
+ * 旧位置导入也挂在这里：页面第一次启动时来要一次，主进程只读一遍旧 profile。
+ */
+function startSharedReconcile() {
+  let version = '';
+  let running = false;
+  let again = false;
+  let retry = null;
+  const sync = async () => {
+    if (running) {
+      again = true;
+      return;
+    }
+    running = true;
+    try {
+      do {
+        again = false;
+        applySharedPets(sharedHelper.desktopPetsFromConfig(await fetchHostConfig()));
+      } while (again);
+    } catch (error) {
+      console.error('[dsh-pet-desktop-helper] pet list sync failed:', error && error.message ? error.message : error);
+      // 页面只在版本变化时知会一次，拉失败了得自己再试
+      retry ??= setTimeout(() => {
+        retry = null;
+        void sync();
+      }, 3000);
+    } finally {
+      running = false;
+    }
+  };
+  ipcMain.on('pet:shared-config-changed', (event, payload) => {
+    if (!BrowserWindow.fromWebContents(event.sender)) return;
+    const next = typeof payload?.version === 'string' ? payload.version : '';
+    if (!next || next === version) return;
+    version = next;
+    void sync();
+  });
+  let legacy = null;
+  ipcMain.handle('pet:legacy-positions', (event) => {
+    if (!BrowserWindow.fromWebContents(event.sender)) return { positions: {}, complete: false };
+    legacy ??= sharedHelper
+      .readLegacyPositions({ app, BrowserWindow, session: electronApi.session, helperDir: __dirname })
+      .catch((error) => {
+        console.error('[dsh-pet-desktop-helper] legacy positions:', error && error.message ? error.message : error);
+        return { positions: {}, complete: false };
+      });
+    return legacy;
+  });
 }
 
 // ---------- bridge 协议（渲染端 custom scheme → 本进程 → 宿主 stdout JSON 行 + 本地回调） ----------
@@ -886,7 +1042,9 @@ app.whenReady().then(() => {
   }
 
   createPetWindows();
+  if (SHARED) startSharedReconcile();
   startFullScreenWatch();
+  startFrameProbeWatch();
 
   // 宠物窗口跟随：renderer 逐帧上报窗口内容区位置/尺寸
   ipcMain.on('pet:set-bounds', (event, bounds) => {
@@ -1311,12 +1469,27 @@ app.on('window-all-closed', () => {
 // character through the host (same as the console switch) and list it in quick-hidden.json, which
 // the console client reads to show it again on the next app start (client/service.cjs).
 if (process.platform === 'darwin') {
+  // 共用进程模式：Cmd+Q 到的是当前有焦点的宠物窗口（点过宠物、对话框才会让本进程拿到焦点）
+  let lastFocusedPet = '';
+  app.on('browser-window-focus', (_event, win) => {
+    for (const [id, w] of windows) if (w === win) lastFocusedPet = id;
+  });
+  const focusedPetId = () => {
+    const win = BrowserWindow.getFocusedWindow();
+    for (const [id, w] of windows) if (w === win) return id;
+    return windows.has(lastFocusedPet) ? lastFocusedPet : '';
+  };
   let quickHiding = false;
   const quickHide = async () => {
     if (quickHiding) return;
     quickHiding = true;
     try {
-      const ids = petsFromEnv().map((pet) => pet.id);
+      // 共用进程模式只藏点着的那只（菜单栏里的「暂时隐藏这个角色」同理）；哪只都没点过就不动
+      const ids = SHARED ? [focusedPetId()].filter(Boolean) : petsFromEnv().map((pet) => pet.id);
+      if (!ids.length) {
+        quickHiding = false;
+        return;
+      }
       const file = path.join(process.env.DSH_HOME || path.join(app.getPath('home'), '.dsh'), 'pet-control-client', 'quick-hidden.json');
       let listed = [];
       try { listed = JSON.parse(readFileSync(file, 'utf8')); } catch { /* none yet */ }
@@ -1326,6 +1499,8 @@ if (process.platform === 'darwin') {
         const res = await fetch(base + '/pet-display', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, display: 'none' }) });
         if (!res.ok) throw new Error('HTTP ' + res.status);
       }
+      // 每宠一进程时本进程随后就被宿主停掉；共用进程模式进程还在，要能再藏下一只
+      if (SHARED) quickHiding = false;
     } catch (error) {
       console.error('[dsh-pet-desktop-helper] quick hide failed:', error);
       quickHiding = false;

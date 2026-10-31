@@ -67,9 +67,25 @@ contextBridge.exposeInMainWorld('petBridge', {
   onPetHit(cb) {
     ipcRenderer.on('pet:hit', (e, payload) => cb(payload));
   },
+  // ---- 共用进程模式（一个 helper 装下全部宠物，每只一个窗口）----
+  // 配置版本变了就知会主进程：它向宿主拉一次 /config，按桌面宠物名单增删窗口
+  sharedConfigChanged(version) {
+    ipcRenderer.send('pet:shared-config-changed', { version });
+  },
+  // 每宠一进程时各 helper 存下的位置（只在第一次进共用进程模式时导入）
+  legacyPositions() {
+    return ipcRenderer.invoke('pet:legacy-positions');
+  },
   // 显示器热更新：分辨率/缩放变化、插拔屏、旋转后主进程重算桌面几何并推来
   // （{hull, areas, primaryIndex}，屏幕坐标）——渲染端就地重挂视口与边界。
   onDisplays(cb) {
     ipcRenderer.on('pet:displays', (e, geo) => cb(geo));
+  },
+  // 帧率探针（tools/macos/measure_pets.py 触发）：限时统计动画帧间隔与视频丢帧，结果交主进程落盘
+  onFrameProbe(cb) {
+    ipcRenderer.on('pet:frame-probe', (e, req) => cb(req));
+  },
+  frameProbeResult(result) {
+    ipcRenderer.send('pet:frame-probe-result', result);
   },
 });
