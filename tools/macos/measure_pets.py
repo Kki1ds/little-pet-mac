@@ -6,19 +6,19 @@ Run it while 小小桌宠 is running with the pets you normally keep on screen:
     python tools/macos/measure_pets.py              # 30-second sample
     python tools/macos/measure_pets.py --seconds 60 --save before.json
 
-To compare the two window modes, measure once, switch 「所有角色共用一个窗口（省资源）」 in the
+To compare the two process modes, measure once, switch 「所有角色共用一个进程（省资源）」 in the
 menu-bar icon's menu, wait about 15 seconds for the pets to come back, and measure again.
 
 What is counted: every process started for the pets (each `.../electron-helper/main.js` helper
 and its GPU / renderer / utility children). The control console and the pet service are not
 counted; they are the same in both modes. WindowServer is reported on its own line: it is
-shared by every app, but moving windows and large transparent windows show up there.
+shared by every app, but moving and compositing the pet windows shows up there.
 
 CPU is the average over the sample (100% = one core), also split by process kind: a single
 process near 100% is saturated even when the total looks fine. Memory is the physical footprint
 that Activity Monitor shows in its Memory column.
 
-Smoothness: during the sample the pet page counts its animation frame intervals and the video
+Smoothness: during the sample every pet page counts its animation frame intervals and the video
 frames it dropped (the helpers pick up a request file in ~/.dsh/pet-control-client within a
 second). Make the pets do what feels choppy (drag them, throw them into each other) while it runs.
 
@@ -50,19 +50,25 @@ def request_probe(seconds):
     return probe_id
 
 
-def read_probe(probe_id, helpers, wait=8):
-    """Results written by the helpers for this request: {instance: result}."""
+def read_probe(probe_id, wait=8, settle=1.5):
+    """Results written by the pet pages for this request: {page: result}.
+
+    One file per pet page. A helper can hold several pages, so the count is not known in advance:
+    stop once no new result has arrived for `settle` seconds (they all finish within a moment).
+    """
     results = {}
     deadline = time.time() + wait
+    last_new = None
     while time.time() < deadline:
         for file in (CLIENT_DIR / 'frame-probe').glob('*.json'):
             try:
                 r = json.loads(file.read_text('utf-8'))
             except (OSError, ValueError):
                 continue
-            if r.get('id') == probe_id:
+            if r.get('id') == probe_id and file.stem not in results:
                 results[file.stem] = r
-        if len(results) >= helpers:
+                last_new = time.time()
+        if last_new is not None and time.time() - last_new >= settle:
             break
         time.sleep(0.5)
     return results
@@ -84,7 +90,6 @@ def summarize_probe(results):
         'hitches': sum(r.get('hitches', 0) for r in rs),
         'video_dropped': dropped,
         'video_frames': total,
-        'display_moves': sum(r.get('migrations', 0) for r in rs),
     }
 
 
@@ -185,7 +190,7 @@ def main():
     busiest = max((p for p in members if p in stats), key=lambda p: stats[p][0], default=None)
     window_server = [v for v in stats.values() if v[2].startswith('WindowServer')]
     ws_cpu = window_server[0][0] if window_server else None
-    frames = summarize_probe(read_probe(probe_id, len(roots))) if probe_id else None
+    frames = summarize_probe(read_probe(probe_id)) if probe_id else None
     result = {
         'mode': mode,
         'helpers': len(roots),
@@ -208,8 +213,8 @@ def main():
         rate = f'{frames["video_dropped"] / frames["video_frames"] * 100:.1f}%' if frames['video_frames'] else 'n/a'
         print(f'Frames:       interval p50 {frames["frame_p50_ms"]} ms, p95 {frames["frame_p95_ms"]} ms, worst {frames["frame_worst_ms"]} ms; '
               f'{frames["hitches"]} hitches (a frame that took two or more)')
-        print(f'  video:      {frames["video_dropped"]} of {frames["video_frames"]} frames dropped ({rate})'
-              + (f'; {frames["display_moves"]} moves between displays' if mode == 'overlay' else ''))
+        print(f'  video:      {frames["video_dropped"]} of {frames["video_frames"]} frames dropped ({rate}); '
+              f'{frames["pages"]} pet page(s)')
     elif probe_id:
         print('Frames:       no answer from the pet pages (an older build, or the pets were restarting)')
     if args.save:

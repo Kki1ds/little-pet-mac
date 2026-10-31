@@ -14,9 +14,9 @@ const CONFIG = {
   scale: Number(params.get('scale') || '1'),
   petIndex: Number(params.get('petIndex') || '0'),
   petId: params.get('petId') || '',
+  // 共用进程模式（macOS 默认）：一个 helper 装下全部宠物、每只一个窗口，宠物名单变了由主进程增删窗口
+  shared: params.get('shared') === '1',
   topInsetRatio: Number(params.get('topInsetRatio') || '0'),
-  // little-pet-mac 单窗口模式：所有宠物在本页面里，画进每块屏一个的全屏透明窗口（见 overlay.js）
-  overlay: params.get('overlay') === '1',
 };
 
 // ---------- 渲染端坐标系统一约定（DESIGN.md §3.5） ----------
@@ -67,10 +67,6 @@ let WORK_AREAS = [];
 let PANELS = [];
 /** 主屏工作区（视口相对坐标）：角落定位与「回到初始位置」用它——外接矩形的角落可能落在空洞里 */
 let PRIMARY_AREA = null;
-/** 显示器 id（与 AREAS / PANELS 同序）：单窗口模式按它给每块屏配一个透明窗口 */
-let DISPLAY_IDS = [];
-/** 单窗口模式里本页面自己的窗口盖在哪块屏上（主进程定，一般是主屏）；其它屏的窗口由本页 window.open 打开 */
-let OPENER_DISPLAY_ID = null;
 
 /** 把主进程给的桌面几何（{hull, areas, panels, primaryIndex}，屏幕坐标）挂到 VIEW / AREAS / PANELS */
 function applyDeskGeometry(geo) {
@@ -110,14 +106,7 @@ function applyDeskGeometry(geo) {
     -VIEW.y,
   );
   const pi = Number(geo.primaryIndex);
-  const primaryIndex = Number.isInteger(pi) && pi >= 0 && pi < AREAS.length ? pi : 0;
-  PRIMARY_AREA = AREAS[primaryIndex];
-  DISPLAY_IDS =
-    geo && Array.isArray(geo.ids) && geo.ids.length === list.length ? geo.ids.slice() : list.map((_, i) => i);
-  OPENER_DISPLAY_ID =
-    geo && geo.openerId !== undefined && geo.openerId !== null && DISPLAY_IDS.includes(geo.openerId)
-      ? geo.openerId
-      : DISPLAY_IDS[primaryIndex];
+  PRIMARY_AREA = AREAS[Number.isInteger(pi) && pi >= 0 && pi < AREAS.length ? pi : 0];
   return true;
 }
 
@@ -144,14 +133,6 @@ applyDeskGeometry({
     return null;
   })(),
   primaryIndex: Number(params.get('primaryIndex') || 0),
-  ids: (() => {
-    try {
-      return JSON.parse(params.get('ids') || 'null');
-    } catch {
-      return null;
-    }
-  })(),
-  openerId: params.has('openerId') ? Number(params.get('openerId')) : null,
   workAreas: (() => {
     try {
       return JSON.parse(params.get('workAreas') || 'null');
@@ -180,7 +161,7 @@ const TIGHT_MARGIN_RATIO = 0.02;
 const rootEl = document.getElementById('root');
 const errorEl = document.getElementById('pet-error');
 let config = null; // { pets: 拍平后的成品实例列表, physics, confineToScreen }（loadConfig 填充）
-let sprites = []; // PetSprite[]（每宠一窗时只装一只；单窗口模式装全部桌面宠物）
+let sprites = []; // PetSprite[]（本窗口只装一只宠物）
 let balance = null; // BalanceState（本窗口单宠共用）
 let balanceTick = 0;
 let balanceNoticeKey = null; // 上次已提示的不可用原因（reason:provider）：自动轮询只在原因变化时再弹（判定在 shared，与浏览器同一份）

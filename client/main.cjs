@@ -10,11 +10,11 @@ app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
 let window,tray,quitting=false;
 // macOS: menu-bar-only by default (the bundle sets LSUIElement); the console or tray menu can turn the Dock icon back on.
 const settingsFile=path.join(service.HOME,'pet-control-client','mac-settings.json');
-// singleWindow: all pets share one transparent window per display (one helper process instead of one per pet).
-const defaultSettings={showDock:false,singleWindow:true};
+// sharedProcess: all pets run in one helper process (each still in its own small window) instead of one process per pet.
+const defaultSettings={showDock:false,sharedProcess:true};
 function readSettings(){try{return {...defaultSettings,...JSON.parse(fs.readFileSync(settingsFile,'utf8'))};}catch{return {...defaultSettings};}}
 let settings=readSettings();
-service.setSingleWindow(settings.singleWindow);
+service.setSharedProcess(settings.sharedProcess);
 if(!app.requestSingleInstanceLock()){app.quit();}else if(process.argv.includes('--quit')){app.quit();}else{
  app.on('second-instance',(_event,argv)=>{if(argv.includes('--quit')){void quitAll();return;}if(window){window.show();if(window.isMinimized())window.restore();window.focus();}});
  app.whenReady().then(async()=>{
@@ -75,22 +75,22 @@ if(!app.requestSingleInstanceLock()){app.quit();}else if(process.argv.includes('
 function show(){if(!window)return;if(mac)app.focus({steal:true});window.show();window.focus();}
 function buildTrayMenu(){
  const items=[{label:'打开角色控制台',click:show},{label:'全部开启',click:()=>showAll().catch(e=>dialog.showErrorBox('开启失败',e.message))},{label:'隐藏全部角色',click:()=>hideAll().catch(e=>dialog.showErrorBox('隐藏失败',e.message))},{type:'separator'}];
- if(mac)items.push({label:'在 Dock 栏显示图标',type:'checkbox',checked:settings.showDock,click:item=>{setShowDock(item.checked).catch(e=>dialog.showErrorBox('设置失败',e.message));}},{label:'所有角色共用一个窗口（省资源）',type:'checkbox',checked:settings.singleWindow,enabled:!switchingMode,click:item=>{setSingleWindow(item.checked).catch(e=>dialog.showErrorBox('切换失败',e.message));}},{type:'separator'});
+ if(mac)items.push({label:'在 Dock 栏显示图标',type:'checkbox',checked:settings.showDock,click:item=>{setShowDock(item.checked).catch(e=>dialog.showErrorBox('设置失败',e.message));}},{label:'所有角色共用一个进程（省资源）',type:'checkbox',checked:settings.sharedProcess,enabled:!switchingMode,click:item=>{setSharedProcess(item.checked).catch(e=>dialog.showErrorBox('切换失败',e.message));}},{type:'separator'});
  items.push({label:'退出全部桌宠',click:()=>quitAll()});
  tray.setContextMenu(Menu.buildFromTemplate(items));
 }
 // Switching restarts the pet service in the other mode. On/off states carry over; each mode keeps its own
-// pet positions (the first single-window start imports the per-window ones, see overlay-main.js).
+// pet positions (the first shared-process start imports the per-process ones, see shared-helper.js).
 let switchingMode=false;
-async function setSingleWindow(value){
- if(switchingMode)return settings.singleWindow;
- settings={...settings,singleWindow:Boolean(value)};fs.writeFileSync(settingsFile,JSON.stringify(settings,null,1));
- service.setSingleWindow(settings.singleWindow);
+async function setSharedProcess(value){
+ if(switchingMode)return settings.sharedProcess;
+ settings={...settings,sharedProcess:Boolean(value)};fs.writeFileSync(settingsFile,JSON.stringify(settings,null,1));
+ service.setSharedProcess(settings.sharedProcess);
  switchingMode=true;if(tray)buildTrayMenu();
- try{await service.restartServer('无法切换窗口模式');}
+ try{await service.restartServer('无法切换进程模式');}
  finally{switchingMode=false;if(tray)buildTrayMenu();}
  service.list().then(publishRoles).catch(()=>{});
- return settings.singleWindow;
+ return settings.sharedProcess;
 }
 async function applyDock(){if(!mac)return;if(settings.showDock)await app.dock.show();else app.dock.hide();}
 async function setShowDock(value){

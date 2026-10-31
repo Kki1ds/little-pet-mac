@@ -84,18 +84,8 @@ async function boot() {
       scheduleReboot();
       return;
     }
-    if (Overlay) {
-      // 单窗口模式：本页面装下全部桌面宠物（每宠一窗的位置记录先导入一次，见 overlay.js）
-      await Overlay.importLegacyPositions();
-      for (const s of sprites) s.dispose();
-      sprites = pets.map((p) => new PetSprite(p));
-      Overlay.syncPets();
-      window.__dshPetDebug.configOk = true;
-      window.__dshPetDebug.spriteCount = sprites.length;
-      for (const s of sprites) s.playIdle();
-      startLoops();
-      return;
-    }
+    // 共用进程模式第一次启动：先把每宠一进程时存下的位置导进来，宠物才能出现在老地方
+    if (CONFIG.shared) await importLegacyPositions();
     // 本窗口只承载一只宠物：petIndex 由主进程按 DSH_PET_PETS 顺序注入
     const pet = CONFIG.petId ? pets.find((entry) => entry.id === CONFIG.petId) : pets[CONFIG.petIndex];
     if (!pet) {
@@ -146,8 +136,6 @@ function injectAssets() {
 if (window.petBridge && window.petBridge.onDisplays) {
   window.petBridge.onDisplays((geo) => {
     if (!applyDeskGeometry(geo)) return;
-    // 单窗口模式：先按新的屏幕列表收拾窗口（本页窗口可能换了屏、拔掉的屏的窗口要关），再重摆宠物
-    if (Overlay) Overlay.onDisplays();
     for (const s of sprites) s.relayout();
   });
 }
@@ -163,9 +151,31 @@ window.addEventListener('resize', () => {
   }
 });
 
+// ---------- 共用进程模式：导入每宠一进程时的位置 ----------
+// 每宠一进程时各宠物的位置存在各自 helper 的 profile 里（localStorage，键 dsh-pet-position:<id>）；
+// 共用进程模式用自己的 profile，第一次启动时主进程把旧位置读出来，这里补进本 profile（已有记录的不覆盖）。
+// 同一 profile 的窗口共用 localStorage，哪个窗口先导入都一样；导完打标记，之后不再导。
+async function importLegacyPositions() {
+  const MARK = 'dsh-pet-legacy-positions-imported';
+  try {
+    if (localStorage.getItem(MARK) || !window.petBridge || !window.petBridge.legacyPositions) return;
+    const legacy = await window.petBridge.legacyPositions();
+    for (const [id, pos] of Object.entries((legacy && legacy.positions) || {})) {
+      const key = 'dsh-pet-position:' + id;
+      if (localStorage.getItem(key) === null && pos && Number.isFinite(pos.rx) && Number.isFinite(pos.ry)) {
+        localStorage.setItem(key, JSON.stringify({ rx: pos.rx, ry: pos.ry }));
+      }
+    }
+    // 有旧 profile 没读成（比如旧进程还没退干净）就不打标记，下次启动再试
+    if (legacy && legacy.complete) localStorage.setItem(MARK, String(Date.now()));
+  } catch (error) {
+    console.warn('[dsh-pet] legacy positions import failed:', error);
+  }
+}
+
 // ---------- 帧率探针（tools/macos/measure_pets.py 经主进程触发；平时不跑） ----------
 // 限时跑一个 rAF 记帧间隔（主线程或合成卡住时间隔会变长），并统计各视频的丢帧数；
-// 两种窗口模式同一套口径，结束后交主进程写进 ~/.dsh/pet-control-client/frame-probe/。
+// 两种进程模式同一套口径，结束后交主进程写进 ~/.dsh/pet-control-client/frame-probe/。
 let frameProbeId = '';
 if (window.petBridge && window.petBridge.onFrameProbe) {
   window.petBridge.onFrameProbe((req) => {
@@ -200,7 +210,6 @@ function videoCounter() {
 
 function runFrameProbe(id, ms) {
   const sampleVideo = videoCounter();
-  const startMigrations = Overlay ? Overlay.migrations : 0;
   const gaps = [];
   const t0 = performance.now();
   let last = 0;
@@ -219,7 +228,7 @@ function runFrameProbe(id, ms) {
     const round = (x) => Math.round(x * 10) / 10;
     window.petBridge.frameProbeResult({
       id,
-      mode: Overlay ? 'overlay' : 'per-pet',
+      mode: CONFIG.shared ? 'shared' : 'per-pet',
       pets: sprites.map((s) => s.pet.id),
       seconds: round((performance.now() - t0) / 1000),
       frames: gaps.length,
@@ -231,7 +240,6 @@ function runFrameProbe(id, ms) {
       hitches: gaps.filter((g) => g > p50 * 1.8).length,
       videoDropped: video.dropped,
       videoTotal: video.total,
-      migrations: Overlay ? Overlay.migrations - startMigrations : 0,
     });
   };
   requestAnimationFrame(step);

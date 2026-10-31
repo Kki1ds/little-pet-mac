@@ -83,23 +83,7 @@ function shouldConceal(state) {
   return displays.reduce((sum, d) => sum + overlapArea(body, d), 0) * 2 > area;
 }
 
-/**
- * 单窗口模式：某块屏的透明窗口该不该藏起来——它有一半以上落在全屏的屏上（窗口与屏一一对应，
- * 实际就是「这块屏在全屏」）。宠物归哪块屏的窗口按身体中心定，与 shouldConceal 的「身体过半」同义。
- * 这块屏上正在拖拽 / 开着菜单时维持现状，结束后再补判一次（同 shouldConceal）。
- * @param {{bounds:object, displays:object[], busy:boolean, concealed:boolean}} state
- */
-function overlayConcealed(state) {
-  const { bounds, displays, busy, concealed } = state || {};
-  if (busy) return !!concealed;
-  if (!bounds || !Array.isArray(displays) || !displays.length) return false;
-  const area = bounds.width * bounds.height;
-  if (!(area > 0)) return false;
-  return displays.reduce((sum, d) => sum + overlapArea(bounds, d), 0) * 2 > area;
-}
-
 module.exports = {
-  overlayConcealed,
   FULLSCREEN_POLL_MS,
   FULLSCREEN_RESTART_MS,
   FULLSCREEN_MAX_RESTARTS,

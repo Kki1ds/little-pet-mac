@@ -79,19 +79,13 @@ class PetSprite {
     window.__dshPetDebug.sideAllow = this.sideAllow;
     // 窗口四周外扩（= WINDOW_MARGIN_RATIO×宠物尺寸）：sprite 钉在 (margin.l, margin.t)，
     // 窗口 = sprite + 四边余量——气泡/未来弹窗显示在余量里；余量透明且点击穿透
-    // 单窗口模式（Overlay）没有跟着宠物走的小窗口，也就没有四周余量：sprite 直接按包围盒摆在屏幕窗口里
-    const m = Overlay ? 0 : this.size * TIGHT_MARGIN_RATIO;
+    const m = this.size * TIGHT_MARGIN_RATIO;
     this.margin = { t: m, r: m, b: m, l: m };
     this.roomy = false; // 右下是否已放宽（见 updateRoom）
     this.roomTimer = null;
     window.__dshPetDebug.winMargin = this.margin;
     // 宠物包围盒左上角在【工作区】坐标系里的位置（本窗口的位置 = 宠物的位置）
     this.pos = { x: 0, y: 0 };
-    // 单窗口模式：宠物当前画在哪块屏的窗口里 / 拖拽是在哪个窗口按下的 / 拖拽中搬过家（指针捕获已失效）
-    this.overlay = null;
-    this.dragOverlay = null;
-    this.captureLost = false;
-    this.disposed = false;
 
     // 播放状态（与浏览器同构）
     // 动画池与权重按宠物取：文件宠物（pet/ 目录定义，extra）自带**完整独立**动画池；
@@ -227,29 +221,49 @@ class PetSprite {
     this.el.appendChild(this.bubble);
     this.el.appendChild(this.tip);
     this.el.appendChild(stage);
-    // 单窗口模式由 Overlay 在首次摆放时挂进对应屏的窗口（position() 里同步完成）
-    if (!Overlay) rootEl.appendChild(this.el);
+    rootEl.appendChild(this.el);
     this.position();
 
     // 事件（与浏览器同一套：pointerdown/move、click、window pointerup/cancel）
     const ac = new AbortController();
     this.ac = ac;
     // 级联菜单新增面板、聊天输入增长都可能在鼠标停住时发生，不能只等下一次 mousemove。
-    // （单窗口模式由 Overlay 统一观察每个窗口的菜单，见 overlay.js 的 syncControls）
+    this.inputRegionResize = new ResizeObserver(() => this.syncInputRegions());
     this.inputRegionElements = new Set();
-    if (!Overlay) {
-      this.inputRegionResize = new ResizeObserver(() => this.syncInputRegions());
-      this.inputRegionMutation = new MutationObserver(() => this.syncInputRegions());
-      this.inputRegionMutation.observe(document.body, { childList: true, subtree: true });
-    }
+    this.inputRegionMutation = new MutationObserver(() => this.syncInputRegions());
+    this.inputRegionMutation.observe(document.body, { childList: true, subtree: true });
     this.hit.addEventListener('pointerdown', (e) => this.onPointerDown(e), { signal: ac.signal });
     this.hit.addEventListener('pointermove', (e) => this.onPointerMove(e), { signal: ac.signal });
     this.hit.addEventListener('click', () => this.onClick(), { signal: ac.signal });
     this.hit.addEventListener('contextmenu', (e) => this.onContextMenu(e), { signal: ac.signal });
-    // 拖拽中搬到另一块屏的窗口时指针捕获会失效：那不是松手（松手由按下时那个窗口的 pointerup 报）
-    this.hit.addEventListener('lostpointercapture', (e) => { if (!this.captureLost) this.onPointerUp(e); }, { signal: ac.signal });
-    // 单窗口模式下以下 window 级监听由 Overlay 按窗口统一装（一页多宠，各宠自己装会互相收到对方的事件）
-    if (!Overlay) this.listenWindow(ac);
+    window.addEventListener('pointerup', (e) => this.onPointerUp(e), { signal: ac.signal });
+    window.addEventListener('pointercancel', (e) => this.onPointerUp(e), { signal: ac.signal });
+    this.hit.addEventListener('lostpointercapture', (e) => this.onPointerUp(e), { signal: ac.signal });
+    // 点击穿透：窗口默认整窗穿透（main 设 setIgnoreMouseEvents(true, {forward:true})），
+    // 光标进/出身体命中区时翻转可交互；穿透期间 mousemove 由 main 转发进来（forward:true），
+    // mouseleave 保证光标离开窗口立即恢复穿透（透明像素不挡下层应用，与浏览器一致）。
+    window.addEventListener('mousemove', (e) => this.onMouseMove(e), { signal: ac.signal });
+    window.addEventListener(
+      'blur',
+      () => {
+        // 切到其它应用后旧菜单不应继续占着整个透明窗口；丢失松手时也释放拖拽。
+        this.closeMenu();
+        if (this.dragState.active) this.onPointerUp();
+        if (!this.chatOpen) this.setInteractive(false);
+      },
+      { signal: ac.signal },
+    );
+    window.addEventListener(
+      'mouseleave',
+      () => {
+        // 光标离开窗口：菜单若开着立刻收起（菜单是窗口内 DOM，离开即不可达），再恢复穿透。
+        // 拖拽中与对话弹窗开着都不恢复：前者会绕过 busy 造成穿透并丢失 pointerup，
+        // 后者要留光标回来点输入框。
+        this.closeMenu();
+        if (!this.chatOpen && !this.dragState.active) this.setInteractive(false);
+      },
+      { signal: ac.signal },
+    );
 
     // 宠物间碰撞（跨窗 broker）：订阅其它宠物状态广播（碰撞检测用）+ 「被撞」事件 → onDeskHit。
     // 注意：退订由窗口销毁自然回收（webContents 销毁后 ipc 事件不再派发），无需显式取消。
@@ -257,8 +271,7 @@ class PetSprite {
     this.throwState = null; // 飞行中的实时状态（被撞查询 / 其它窗碰撞检测时上报用）
     this.pressScoreFired = false; // 按下瞬间已触发过积分（pointerdown 即触发；click 据此不重复弹，同浏览器）
     this.lastFlightReport = 0;
-    // 单窗口模式：被撞事件由 Overlay 按宠物 id 分发；不订阅全量广播（碰撞交给控制台的 broker 算）
-    if (!Overlay && window.petBridge && window.petBridge.onFlightStates) {
+    if (window.petBridge && window.petBridge.onFlightStates) {
       window.petBridge.onFlightStates((states) => {
         if (!states || typeof states !== 'object') return;
         const next = {};
@@ -288,47 +301,13 @@ class PetSprite {
     }
   }
 
-  /** 每宠一窗：本窗口的 window 级监听（拖拽收尾 / 转发的 mousemove / 失焦 / 离开窗口） */
-  listenWindow(ac) {
-    window.addEventListener('pointerup', (e) => this.onPointerUp(e), { signal: ac.signal });
-    window.addEventListener('pointercancel', (e) => this.onPointerUp(e), { signal: ac.signal });
-    // 点击穿透：窗口默认整窗穿透（main 设 setIgnoreMouseEvents(true, {forward:true})），
-    // 光标进/出身体命中区时翻转可交互；穿透期间 mousemove 由 main 转发进来（forward:true），
-    // mouseleave 保证光标离开窗口立即恢复穿透（透明像素不挡下层应用，与浏览器一致）。
-    window.addEventListener('mousemove', (e) => this.onMouseMove(e), { signal: ac.signal });
-    window.addEventListener(
-      'blur',
-      () => {
-        // 切到其它应用后旧菜单不应继续占着整个透明窗口；丢失松手时也释放拖拽。
-        this.closeMenu();
-        if (this.dragState.active) this.onPointerUp();
-        if (!this.chatOpen) this.setInteractive(false);
-      },
-      { signal: ac.signal },
-    );
-    window.addEventListener(
-      'mouseleave',
-      () => {
-        // 光标离开窗口：菜单若开着立刻收起（菜单是窗口内 DOM，离开即不可达），再恢复穿透。
-        // 拖拽中与对话弹窗开着都不恢复：前者会绕过 busy 造成穿透并丢失 pointerup，
-        // 后者要留光标回来点输入框。
-        this.closeMenu();
-        if (!this.chatOpen && !this.dragState.active) this.setInteractive(false);
-      },
-      { signal: ac.signal },
-    );
-  }
-
   dispose() {
-    this.disposed = true;
-    // 还没落盘的位置立刻存：单窗口模式改大小时会紧接着按同一个 id 重建这只宠物
-    if (this._posSaveTimer) this.savePosNow();
     this.mediaGuard?.stop();
     this.logRuntime('角色销毁');
     if (this.playbackGuard) window.clearInterval(this.playbackGuard);
     this.ac.abort();
-    this.inputRegionMutation?.disconnect();
-    this.inputRegionResize?.disconnect();
+    this.inputRegionMutation.disconnect();
+    this.inputRegionResize.disconnect();
     this.inputRegionElements.clear();
     if (this.bubbleTimer !== null) window.clearTimeout(this.bubbleTimer);
     if (this.whisperTimer !== null) window.clearTimeout(this.whisperTimer);
@@ -342,7 +321,6 @@ class PetSprite {
     this.stopDragFollow();
     this.stopSquash();
     this.stopMove();
-    Overlay?.detach(this);
     this.el.remove();
   }
 
@@ -354,11 +332,6 @@ class PetSprite {
   sendBounds(px, py) {
     this.pos = { x: Math.round(px), y: Math.round(py) };
     window.__dshPetDebug.dragPos = { x: this.pos.x, y: this.pos.y };
-    if (Overlay) {
-      // 单窗口模式：不挪系统窗口，只改元素位置（每秒至多 60 次，跨屏时换窗口），见 overlay.js
-      Overlay.place(this);
-      return;
-    }
     if (window.petBridge) {
       // 完整状态一次捎带：size/bottomPad 让静止宠物从首帧起就登记进碰撞站场
       // （此前只有 report-flight 带尺寸，从没飞过的宠物 size=0 被碰撞检测直接跳过）；
@@ -467,7 +440,7 @@ class PetSprite {
 
   // White dragon recovery is isolated from the other characters' playback.
   logRuntime(event, details = {}) {
-    window.petBridge?.recordRuntime?.(event, { animation: this.anim, ...details }, this.pet.id);
+    window.petBridge?.recordRuntime?.(event, { animation: this.anim, ...details });
   }
 
   recoverPlayback(reason) {
@@ -923,7 +896,7 @@ class PetSprite {
       this.throwState = state;
       // 上报飞行状态（节流 ~30ms）：主进程 broker 汇聚后广播，其它窗口用它做跨窗碰撞检测；
       // broker 协议单位 = 物理像素，这里 ×scale（§3.5 收口）
-      if (!Overlay && window.petBridge && window.petBridge.reportFlight && now - this.lastFlightReport > 30) {
+      if (window.petBridge && window.petBridge.reportFlight && now - this.lastFlightReport > 30) {
         window.petBridge.reportFlight({
           x: toScreen(state.x),
           y: toScreen(state.y),
@@ -1065,15 +1038,13 @@ class PetSprite {
             ' -> +' +
             S.clickScore(grabSpeed, this.size),
         );
-        const doc = this.overlay ? this.overlay.doc : document;
-        S.spawnScoreBurst(e.clientX, e.clientY, doc);
+        S.spawnScoreBurst(e.clientX, e.clientY);
         S.mountScorePopup({
           x: e.clientX,
           y: e.clientY,
           score: S.clickScore(grabSpeed, this.size),
           speed: grabSpeed,
           size: this.pet.size,
-          doc,
         });
       }
     }
@@ -1086,10 +1057,6 @@ class PetSprite {
     // 不主动收就会让提示跟着宠物一路飘（松开后由 onPointerUp 按指针位置复位）
     this.setTip(false);
     this.stopMove();
-    // 单窗口模式：按下时所在的窗口（拖拽中由它接收输入）；Cmd+Q 隐藏的是最后按过的这只
-    this.dragOverlay = this.overlay;
-    this.captureLost = false;
-    Overlay?.focus(this);
     try {
       this.hit.setPointerCapture(e.pointerId);
     } catch {
@@ -1145,7 +1112,6 @@ class PetSprite {
     const wasDragging = d.dragging;
     d.active = false;
     d.dragging = false;
-    this.captureLost = false;
     this.hit.classList.remove('dragging');
     this.stopDragFollow(); // 弹簧跟随立即停（位置定格在实时 this.pos）
     this.stage.style.transform = 'translateY(' + this.bottomPad + 'px)';
@@ -1240,11 +1206,6 @@ class PetSprite {
    * 本方法表达"我有没有在用输入"（优先级更高，覆写常规判定）。
    */
   syncInputBusy() {
-    if (Overlay) {
-      // 单窗口模式：忙碌按窗口算（拖拽按下时的窗口 / 开着菜单的窗口），由 Overlay 汇总上报
-      Overlay.syncBusy();
-      return;
-    }
     this.syncInputRegions();
     const busy = this.inputBusy();
     if (busy === this._inputBusy) return;
@@ -1254,10 +1215,6 @@ class PetSprite {
   }
 
   syncInputRegions() {
-    if (Overlay) {
-      Overlay.syncControls();
-      return;
-    }
     if (!window.petBridge || !window.petBridge.setInputRegions) return;
     const rects = [];
     const controls = [...document.querySelectorAll('.dsh-pet-menu-column, .dsh-pet-chat')];
@@ -1285,11 +1242,6 @@ class PetSprite {
   }
 
   setInteractive(flag) {
-    if (Overlay) {
-      // 单窗口模式：一个窗口里有好几只宠物，不能凭这一只的意愿翻整窗——按光标与全部宠物重新判定
-      Overlay.refreshHint(this.overlay);
-      return;
-    }
     const next = !!flag;
     if (next === this._interactive) return; // 只在状态变化时发 IPC，避免逐帧刷屏
     this._interactive = next;
@@ -1318,7 +1270,6 @@ class PetSprite {
    * 全部关掉后稍等再收回（光标在身体边缘进进出出时不来回改窗口尺寸）。左上不动，宠物不跳。
    */
   updateRoom() {
-    if (Overlay) return; // 屏幕窗口本来就够大，不用放宽
     const need = this.menuOpen || this.tipOn || this.chatOpen;
     if (this.roomTimer !== null) {
       window.clearTimeout(this.roomTimer);
@@ -1446,17 +1397,6 @@ class PetSprite {
     // 不属于任何显示器的区域（看不见）；菜单本来也不该跨屏显示。
     const area = S.resolveRect(WORK_AREAS, this.pos.x + this.halfW, this.pos.y + this.halfH);
     if (!area) return null;
-    if (Overlay) {
-      // 单窗口模式：窗口 = 整块屏，可视矩形就是宠物所在屏的工作区（换成该窗口的局部坐标）
-      const panel = this.overlay && Overlay.panelOf(this.overlay.id);
-      if (!panel) return null;
-      const x0 = Math.max(area.x, panel.x);
-      const y0 = Math.max(area.y, panel.y);
-      const x1 = Math.min(area.x + area.width, panel.x + panel.width);
-      const y1 = Math.min(area.y + area.height, panel.y + panel.height);
-      if (x1 - x0 < 40 || y1 - y0 < 40) return null;
-      return { x: x0 - panel.x, y: y0 - panel.y, w: x1 - x0, h: y1 - y0 };
-    }
     const winX = this.pos.x + VIEW.x - this.margin.l;
     const winY = this.pos.y + VIEW.y - this.margin.t;
     const winW = this.size + this.margin.l + this.margin.r;
@@ -1507,13 +1447,10 @@ class PetSprite {
     this.setInteractive(true); // 菜单是窗口内 DOM：悬停期间整窗保持可交互，关闭后恢复命中区穿透
     this.syncInputBusy();
     window.__dshPetDebug.menuOpen = true;
-    Overlay?.focus(this);
     const m = S.mountContextMenu({
       tree,
       x: e.clientX,
       y: e.clientY,
-      // 单窗口模式：菜单挂进宠物所在那块屏的窗口
-      doc: this.overlay ? this.overlay.doc : document,
       // 只允许在「窗口 ∩ 工作区」内显示：宠物贴边时外扩余量伸出屏幕，菜单走进那里会被 OS 裁掉（#41）
       clamp: this.visibleClampRect(),
       onAction: (leaf) => this.onMenuAction(leaf),
@@ -1635,8 +1572,6 @@ class PetSprite {
       y: Math.max(4, this.hit.getBoundingClientRect().top + 6),
       // 弹窗同菜单：只允许在「窗口 ∩ 工作区」内显示，贴边时不被屏幕裁掉（#41）
       clamp: this.visibleClampRect(),
-      // 单窗口模式：弹窗挂进宠物所在那块屏的窗口
-      doc: this.overlay ? this.overlay.doc : document,
       onSent: () => {
         // 发送成功：回复已写进 S，立刻跑一拍 /state 让气泡 0 延迟出现（不必等下一个 1s）
         console.info('[dsh-pet] 对话已发送 pet=' + this.pet.id);
@@ -1661,17 +1596,13 @@ class PetSprite {
 
   schedulePosSave() {
     clearTimeout(this._posSaveTimer);
-    this._posSaveTimer = setTimeout(() => this.savePosNow(), 400);
-  }
-
-  savePosNow() {
-    clearTimeout(this._posSaveTimer);
-    this._posSaveTimer = null;
-    try {
-      const key = POS_KEY_PREFIX + this.pet.id;
-      if (this._customPos) localStorage.setItem(key, JSON.stringify(this._customPos));
-      else localStorage.removeItem(key);
-    } catch {}
+    this._posSaveTimer = setTimeout(() => {
+      try {
+        const key = POS_KEY_PREFIX + this.pet.id;
+        if (this._customPos) localStorage.setItem(key, JSON.stringify(this._customPos));
+        else localStorage.removeItem(key);
+      } catch {}
+    }, 400);
   }
 
   // 「回到初始位置」菜单：停掉漫游/移动，清掉拖拽/漫游留下的会话位置，回到配置角落

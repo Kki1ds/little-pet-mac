@@ -254,10 +254,11 @@ function applyAnimLeaf(petId, leaf) {
 let animationConfigVersion = null;
 async function refreshAnimationConfig(version) {
   if (!version || version === animationConfigVersion) return;
+  // 共用进程模式：知会主进程配置变了，由它向宿主拉名单、增删/重建窗口（每个窗口都会知会，主进程去重）
+  if (CONFIG.shared && window.petBridge && window.petBridge.sharedConfigChanged) window.petBridge.sharedConfigChanged(String(version));
   const response = await fetch(BASE + '/config', { cache: 'no-store' });
   if (!response.ok) throw new Error('animation config http ' + response.status);
   const pets = S.flattenConfigPets(await response.json());
-  if (Overlay) reconcileSprites(pets);
   for (const sprite of sprites) {
     const pet = pets.find(p => p.id === sprite.pet.id);
     if (!pet) continue;
@@ -274,33 +275,6 @@ async function refreshAnimationConfig(version) {
     sprite.pet.workStatusEnabled = pet.workStatusEnabled;
   }
   animationConfigVersion = version;
-}
-
-/**
- * 单窗口模式：控制台开关角色、加减分身、改大小时宿主不重启 helper（重启会让所有宠物一起闪一下），
- * 这里按新配置就地增删宠物；大小变了的那只重建（位置记录在 localStorage 里，重建后原地出现）。
- */
-function reconcileSprites(pets) {
-  const visible = pets.filter((p) => S.isDesktopVisible(p.display));
-  const wanted = new Map(visible.map((p) => [p.id, p]));
-  const kept = new Map();
-  for (const s of sprites) {
-    const p = wanted.get(s.pet.id);
-    if (p && p.size === s.pet.size) kept.set(s.pet.id, s);
-    else s.dispose();
-  }
-  const added = [];
-  sprites = visible.map((p) => {
-    const s = kept.get(p.id);
-    if (s) return s;
-    const fresh = new PetSprite(p);
-    added.push(fresh);
-    return fresh;
-  });
-  for (const s of added) s.playIdle();
-  window.__dshPetDebug.spriteCount = sprites.length;
-  Overlay.syncPets();
-  Overlay.syncBusy();
 }
 
 /** 跑一拍 /state（1s 定时与「前端动作后立刻刷新」共用同一份实现） */

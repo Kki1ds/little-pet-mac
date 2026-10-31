@@ -34,8 +34,8 @@ contextBridge.exposeInMainWorld('petBridge', {
       return null;
     }
   },
-  recordRuntime(event, details, petId) {
-    ipcRenderer.send('pet:runtime-log', { event, details, petId });
+  recordRuntime(event, details) {
+    ipcRenderer.send('pet:runtime-log', { event, details });
   },
   setBounds(x, y, width, height, boxX, boxY, size, bottomPad, vx, vy, collisionEnabled, flying, marginL, marginT) {
     ipcRenderer.send('pet:set-bounds', { x, y, width, height, boxX, boxY, size, bottomPad, vx, vy, collisionEnabled, flying, marginL, marginT });
@@ -67,38 +67,12 @@ contextBridge.exposeInMainWorld('petBridge', {
   onPetHit(cb) {
     ipcRenderer.on('pet:hit', (e, payload) => cb(payload));
   },
-  // ---- 单窗口模式（overlay.js；每块屏一个透明窗口，消息都带显示器 id）----
-  // 各宠物位置与身体矩形（物理像素）：主进程兜底命中判定 + 碰撞 broker
-  overlayStates(list) {
-    ipcRenderer.send('pet:overlay-states', list);
+  // ---- 共用进程模式（一个 helper 装下全部宠物，每只一个窗口）----
+  // 配置版本变了就知会主进程：它向宿主拉一次 /config，按桌面宠物名单增删窗口
+  sharedConfigChanged(version) {
+    ipcRenderer.send('pet:shared-config-changed', { version });
   },
-  // 光标在某块屏上是否落在宠物身体/菜单上（即时判定，主进程的 60ms 轮询兜底）
-  overlayHint(display, on) {
-    ipcRenderer.send('pet:overlay-hint', { display, on: !!on });
-  },
-  // 每块屏的忙碌状态 [{display, drag, menu}]；拖拽中每秒重发一次当心跳
-  overlayBusy(list) {
-    ipcRenderer.send('pet:overlay-busy', list);
-  },
-  // 菜单/对话框矩形（物理像素，带 display）
-  overlayControls(list) {
-    ipcRenderer.send('pet:overlay-controls', list);
-  },
-  // 当前宠物名单 [{id, name, assetRoot}]：主进程据此建/撤角色日志与碰撞连接
-  overlayPets(list) {
-    ipcRenderer.send('pet:overlay-pets', list);
-  },
-  // 最后点过的宠物（Cmd+Q 隐藏它）
-  overlayFocus(id) {
-    ipcRenderer.send('pet:overlay-focus', id);
-  },
-  onOverlayIgnore(cb) {
-    ipcRenderer.on('pet:overlay-ignore', (e, msg) => cb(msg));
-  },
-  onOverlayHit(cb) {
-    ipcRenderer.on('pet:overlay-hit', (e, payload) => cb(payload));
-  },
-  // 每宠一窗时各 helper 存下的位置（只在第一次进单窗口模式时导入）
+  // 每宠一进程时各 helper 存下的位置（只在第一次进共用进程模式时导入）
   legacyPositions() {
     return ipcRenderer.invoke('pet:legacy-positions');
   },
