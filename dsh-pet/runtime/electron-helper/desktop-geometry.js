@@ -23,6 +23,8 @@ function buildDeskGeometry(displays, primaryId, platform) {
     areas,
     workAreas,
     panels,
+    // Display ids in the same order (one overlay window per display in overlay mode).
+    ids: displays.map((d) => d.id),
     primaryIndex: Math.max(
       0,
       displays.findIndex((d) => d.id === primaryId),

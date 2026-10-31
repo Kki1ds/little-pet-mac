@@ -689,13 +689,16 @@ function isBranchNode(n) {
 }
 function mountContextMenu(opts) {
 	const { tree, x, y, onAction, onClose, clamp } = opts;
+	// little-pet-mac overlay: a pet may live in another display's overlay window (same script realm).
+	const doc = opts.doc || document;
+	const view = doc.defaultView || window;
 	const c = clamp && Number.isFinite(clamp.x + clamp.y + clamp.w + clamp.h) ? clamp : {
 		x: 0,
 		y: 0,
-		w: window.innerWidth,
-		h: window.innerHeight
+		w: view.innerWidth,
+		h: view.innerHeight
 	};
-	const root = document.createElement("div");
+	const root = doc.createElement("div");
 	root.className = "dsh-pet-menu";
 	root.style.left = "0px";
 	root.style.top = "0px";
@@ -731,19 +734,19 @@ function mountContextMenu(opts) {
 	/** 构建一层面板（nodes 列表）；分支项的子面板**平级**挂到 root 下，不嵌套。
 	*  面板自身先入 DOM、子面板随后入 → 层级越深绘制越靠上（子菜单盖在父菜单上层）。 */
 	const buildPanel = (nodes) => {
-		const panel = document.createElement("div");
+		const panel = doc.createElement("div");
 		panel.className = "dsh-pet-menu-column";
 		panel.style.display = "none";
 		if (clamp) panel.style.maxHeight = Math.min(460, Math.max(120, c.h - 16)) + "px";
 		root.appendChild(panel);
 		for (const node of nodes) {
-			const item = document.createElement("div");
+			const item = doc.createElement("div");
 			item.className = "dsh-pet-menu-item";
 			if (isBranchNode(node)) {
 				item.classList.add("dsh-pet-menu-branch");
-				const label = document.createElement("span");
+				const label = doc.createElement("span");
 				label.textContent = node.label;
-				const arrow = document.createElement("span");
+				const arrow = doc.createElement("span");
 				arrow.className = "dsh-pet-menu-arrow";
 				arrow.textContent = "▸";
 				item.appendChild(label);
@@ -756,7 +759,7 @@ function mountContextMenu(opts) {
 					showPanel(childPanel, item);
 				});
 			} else {
-				const label = document.createElement("span");
+				const label = doc.createElement("span");
 				label.textContent = node.label;
 				item.appendChild(label);
 				item.addEventListener("click", (e) => {
@@ -772,7 +775,7 @@ function mountContextMenu(opts) {
 	};
 	const rootPanel = buildPanel(tree);
 	rootPanel.style.display = "block";
-	document.body.appendChild(root);
+	doc.body.appendChild(root);
 	rootPanel.style.left = "";
 	rootPanel.style.top = "";
 	const rw = rootPanel.offsetWidth;
@@ -801,15 +804,15 @@ function mountContextMenu(opts) {
 		if (closed) return;
 		if (e.key === "Escape") close();
 	};
-	document.addEventListener("mousedown", onDocPointerDown, true);
-	document.addEventListener("keydown", onDocKeyDown, true);
+	doc.addEventListener("mousedown", onDocPointerDown, true);
+	doc.addEventListener("keydown", onDocKeyDown, true);
 	const close = () => {
 		if (closed) return;
 		closed = true;
 		if (leaveTimer !== null) window.clearTimeout(leaveTimer);
 		leaveTimer = null;
-		document.removeEventListener("mousedown", onDocPointerDown, true);
-		document.removeEventListener("keydown", onDocKeyDown, true);
+		doc.removeEventListener("mousedown", onDocPointerDown, true);
+		doc.removeEventListener("keydown", onDocKeyDown, true);
 		root.remove();
 		if (onClose) onClose();
 	};
@@ -866,54 +869,56 @@ const CHAT_CSS = [
 const CHAT_MIN_W = 220;
 const CHAT_MAX_W = 340;
 const CHAT_H_PAD = 22;
-let chatCssInjected = false;
-function injectChatCss() {
-	if (chatCssInjected || typeof document === "undefined") return;
-	chatCssInjected = true;
-	const tag = document.createElement("style");
+const chatCssDocs = new WeakSet();
+function injectChatCss(doc = typeof document === "undefined" ? null : document) {
+	if (!doc || chatCssDocs.has(doc)) return;
+	chatCssDocs.add(doc);
+	const tag = doc.createElement("style");
 	tag.dataset.plugin = "dsh-pet";
 	tag.dataset.pluginCss = "dsh-pet/chat";
 	tag.textContent = CHAT_CSS;
-	document.head.appendChild(tag);
+	doc.head.appendChild(tag);
 }
 function mountChatDialog(opts) {
-	injectChatCss();
+	const doc = opts.doc || document;
+	const view = doc.defaultView || window;
+	injectChatCss(doc);
 	const { petId, x, y, onSent, onClose, clamp } = opts;
 	const baseUrl = opts.baseUrl ?? "/dsh-pet-7340/chat";
 	const withPet = baseUrl + "?pet=" + encodeURIComponent(petId);
 	const c = clamp && Number.isFinite(clamp.x + clamp.y + clamp.w + clamp.h) ? clamp : {
 		x: 0,
 		y: 0,
-		w: window.innerWidth,
-		h: window.innerHeight
+		w: view.innerWidth,
+		h: view.innerHeight
 	};
-	const root = document.createElement("div");
+	const root = doc.createElement("div");
 	root.className = "dsh-pet-chat";
 	root.setAttribute("role", "dialog");
 	root.setAttribute("aria-label", "桌宠对话");
 	root.style.maxWidth = Math.max(1, c.w - 8) + "px";
 	root.style.maxHeight = Math.max(1, c.h - 8) + "px";
-	const header = document.createElement("div");
+	const header = doc.createElement("div");
 	header.className = "dsh-pet-chat-head";
-	const title = document.createElement("span");
+	const title = doc.createElement("span");
 	title.className = "dsh-pet-chat-title";
 	title.textContent = "连续对话";
-	const closeButton = document.createElement("button");
+	const closeButton = doc.createElement("button");
 	closeButton.className = "dsh-pet-chat-close";
 	closeButton.type = "button";
 	closeButton.title = "关闭对话（Esc）";
 	closeButton.setAttribute("aria-label", "关闭对话");
-	const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	const icon = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
 	icon.setAttribute("viewBox", "0 0 24 24");
 	icon.setAttribute("aria-hidden", "true");
-	const cross = document.createElementNS("http://www.w3.org/2000/svg", "path");
+	const cross = doc.createElementNS("http://www.w3.org/2000/svg", "path");
 	cross.setAttribute("d", "M6 6l12 12M18 6L6 18");
 	icon.appendChild(cross);
 	closeButton.appendChild(icon);
 	closeButton.addEventListener("click", () => close());
 	header.append(title, closeButton);
 	root.appendChild(header);
-	const input = document.createElement("textarea");
+	const input = doc.createElement("textarea");
 	input.className = "dsh-pet-chat-input";
 	input.placeholder = "说点什么…";
 	input.maxLength = 2e3;
@@ -927,7 +932,7 @@ function mountChatDialog(opts) {
 	};
 	let measureCtx = null;
 	const measureText = (text) => {
-		const ctx = measureCtx ?? (measureCtx = document.createElement("canvas").getContext("2d"));
+		const ctx = measureCtx ?? (measureCtx = doc.createElement("canvas").getContext("2d"));
 		ctx.font = getComputedStyle(input).font;
 		return ctx.measureText(text).width;
 	};
@@ -941,18 +946,18 @@ function mountChatDialog(opts) {
 	};
 	input.addEventListener("input", resizeInput);
 	resizeInput();
-	const err = document.createElement("div");
+	const err = doc.createElement("div");
 	err.className = "dsh-pet-chat-err";
 	err.style.display = "none";
 	err.setAttribute("role", "alert");
-	const status = document.createElement("div");
+	const status = doc.createElement("div");
 	status.className = "dsh-pet-chat-status";
 	status.setAttribute("role", "status");
 	status.textContent = "回车发送 · Shift+回车换行";
 	root.appendChild(input);
 	root.appendChild(err);
 	root.appendChild(status);
-	document.body.appendChild(root);
+	doc.body.appendChild(root);
 	resizeInput();
 	position();
 	let closed = false;
@@ -960,7 +965,7 @@ function mountChatDialog(opts) {
 	const close = () => {
 		if (closed) return;
 		closed = true;
-		document.removeEventListener("keydown", onDocKeyDown, true);
+		doc.removeEventListener("keydown", onDocKeyDown, true);
 		root.remove();
 		if (onClose) onClose();
 	};
@@ -968,7 +973,7 @@ function mountChatDialog(opts) {
 		if (closed) return;
 		if (e.key === "Escape") close();
 	};
-	document.addEventListener("keydown", onDocKeyDown, true);
+	doc.addEventListener("keydown", onDocKeyDown, true);
 	const doSend = () => {
 		if (closed || sending) return;
 		const text = input.value.trim();
@@ -998,7 +1003,7 @@ function mountChatDialog(opts) {
 			if (!closed) {
 				if (err.textContent) status.textContent = "文字已保留，可按回车重试";
 				resizeInput();
-				if (document.hasFocus() && (document.activeElement === document.body || root.contains(document.activeElement))) input.focus();
+				if (doc.hasFocus() && (doc.activeElement === doc.body || root.contains(doc.activeElement))) input.focus();
 			}
 		});
 	};
@@ -1330,15 +1335,15 @@ const SCORE_POPUP_CSS = [
 	"@keyframes dshPetScorePop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}"
 ].join("");
 /** 粒子只注入一次（同 CHAT_CSS 的 injectChatCss 模式） */
-let scoreCssInjected = false;
-function injectScoreCss() {
-	if (scoreCssInjected || typeof document === "undefined") return;
-	scoreCssInjected = true;
-	const tag = document.createElement("style");
+const scoreCssDocs = new WeakSet();
+function injectScoreCss(doc = typeof document === "undefined" ? void 0 : document) {
+	if (!doc || scoreCssDocs.has(doc)) return;
+	scoreCssDocs.add(doc);
+	const tag = doc.createElement("style");
 	tag.dataset.plugin = "dsh-pet";
 	tag.dataset.pluginCss = "dsh-pet/score";
 	tag.textContent = SCORE_POPUP_CSS;
-	document.head.appendChild(tag);
+	doc.head.appendChild(tag);
 }
 /** 粒子数量 */
 const BURST_COUNT = 20;
@@ -1363,18 +1368,18 @@ const BURST_COLORS = [
 	"#ffd54f",
 	"#ef5350"
 ];
-function spawnScoreBurst(x, y) {
+function spawnScoreBurst(x, y, doc = document) {
 	if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-	injectScoreCss();
-	const root = document.createElement("div");
+	injectScoreCss(doc);
+	const root = doc.createElement("div");
 	root.className = "dsh-pet-score-burst";
-	document.body.appendChild(root);
+	doc.body.appendChild(root);
 	const parts = [];
 	for (let i = 0; i < BURST_COUNT; i++) {
 		const angle = Math.random() * Math.PI * 2;
 		const speed = BURST_SPEED_MIN + Math.random() * (BURST_SPEED_MAX - BURST_SPEED_MIN);
 		const r = BURST_RADIUS_MIN + Math.random() * (BURST_RADIUS_MAX - BURST_RADIUS_MIN);
-		const el = document.createElement("div");
+		const el = doc.createElement("div");
 		el.className = "dsh-pet-score-particle";
 		el.style.left = x + "px";
 		el.style.top = y + "px";
@@ -1407,22 +1412,24 @@ function spawnScoreBurst(x, y) {
 	requestAnimationFrame(step);
 }
 function mountScorePopup(opts) {
-	injectScoreCss();
+	const doc = opts.doc || document;
+	const view = doc.defaultView || window;
+	injectScoreCss(doc);
 	const x = opts.x;
 	const y = opts.y;
-	const root = document.createElement("div");
+	const root = doc.createElement("div");
 	root.className = "dsh-pet-score";
-	const val = document.createElement("div");
+	const val = doc.createElement("div");
 	val.className = "dsh-pet-score-val";
 	val.textContent = "+" + opts.score;
-	const sub = document.createElement("div");
+	const sub = doc.createElement("div");
 	sub.className = "dsh-pet-score-sub";
 	sub.textContent = "速度 " + Math.round(opts.speed) + " · 大小 " + Math.round(opts.size);
 	root.appendChild(val);
 	root.appendChild(sub);
-	document.body.appendChild(root);
+	doc.body.appendChild(root);
 	const rr = root.getBoundingClientRect();
-	root.style.left = Math.max(4, Math.min(x - rr.width / 2, window.innerWidth - rr.width - 4)) + "px";
+	root.style.left = Math.max(4, Math.min(x - rr.width / 2, view.innerWidth - rr.width - 4)) + "px";
 	root.style.top = Math.max(4, y - rr.height - 14) + "px";
 	root.offsetWidth;
 	root.classList.add("is-in");
@@ -1433,8 +1440,8 @@ function mountScorePopup(opts) {
 		closed = true;
 		if (timer !== null) window.clearTimeout(timer);
 		timer = null;
-		document.removeEventListener("mousedown", onDocPointerDown, true);
-		document.removeEventListener("keydown", onDocKeyDown, true);
+		doc.removeEventListener("mousedown", onDocPointerDown, true);
+		doc.removeEventListener("keydown", onDocKeyDown, true);
 		root.remove();
 		if (opts.onClose) opts.onClose();
 	};
@@ -1453,8 +1460,8 @@ function mountScorePopup(opts) {
 		if (closed) return;
 		if (e.key === "Escape") close();
 	};
-	document.addEventListener("mousedown", onDocPointerDown, true);
-	document.addEventListener("keydown", onDocKeyDown, true);
+	doc.addEventListener("mousedown", onDocPointerDown, true);
+	doc.addEventListener("keydown", onDocKeyDown, true);
 	timer = window.setTimeout(close, SCORE_POPUP_DURATION_MS);
 	return {
 		el: root,

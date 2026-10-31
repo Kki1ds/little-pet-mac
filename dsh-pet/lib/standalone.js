@@ -2499,6 +2499,13 @@ const ROUTE_PREFIX = "/dsh-pet-7340";
 */
 // 小小桌宠 macOS 客户端也用 Electron 自带的 Node 跑宿主，但它不是 DSH 桌面应用，没有 dsh:// 协议。
 const isDesktopHost = () => Boolean(process.versions.electron) && process.env.DSH_PET_HOST_KIND !== "client";
+/**
+* 单窗口模式（little-pet-mac，macOS 默认开）：全部桌面宠物共用一个 helper，每块屏一个透明窗口
+* （runtime/electron-helper/overlay-main.js）。DSH_PET_OVERLAY=0 退回每只宠物一个 helper、一个小窗口。
+*/
+const desktopOverlayMode = () => process.platform === "darwin" && process.env.DSH_PET_OVERLAY !== "0";
+/** 单窗口模式下那唯一一个 helper 在 helpers 表里的键（带 *，不会和宠物 id 撞上） */
+const OVERLAY_HELPER_KEY = "*overlay";
 /** 不同扩展名对应的 Content-Type 映射 */
 const MIME = {
 	".webm": "video/webm",
@@ -2951,8 +2958,19 @@ function apply(ctx) {
 		const origin = `http://127.0.0.1:${port}`;
 		const siteUrl = ctx.connection.authenticatedUrl(origin);
 		const configUrl = `${origin}${ROUTE_PREFIX}/config`;
-		for (const pet of desktopPetList()) {
-			if (helpers.has(pet.id)) continue;
+		const overlay = desktopOverlayMode();
+		const list = desktopPetList();
+		// 单窗口模式：一个 helper 装下全部宠物（宠物名单由页面自己从配置读，增删改不重启它）
+		const jobs = overlay ? list.length && !helpers.has(OVERLAY_HELPER_KEY) ? [{
+			key: OVERLAY_HELPER_KEY,
+			pets: list,
+			size: 0
+		}] : [] : list.filter((pet) => !helpers.has(pet.id)).map((pet) => ({
+			key: pet.id,
+			pets: [pet],
+			size: pet.size
+		}));
+		for (const job of jobs) {
 			const helper = new HelperProcess({
 				electronPath,
 				env: {
@@ -2961,8 +2979,9 @@ function apply(ctx) {
 					DSH_PET_OPEN_TARGET: isDesktopHost() ? "desktop" : "site",
 					DSH_PET_SCALE: "1",
 					DSH_PET_BRIDGE: "1",
-					DSH_PET_PETS: JSON.stringify([pet]),
-					DSH_PET_INSTANCE_ID: pet.id
+					DSH_PET_PETS: JSON.stringify(job.pets),
+					DSH_PET_INSTANCE_ID: overlay ? "overlay" : job.key,
+					DSH_PET_OVERLAY: overlay ? "1" : "0"
 				},
 				bridgeHandler: async (req) => {
 					const result = await handlePetRoute(req.url ?? "/", req.method ?? "GET", req.body);
@@ -2988,11 +3007,11 @@ function apply(ctx) {
 			}, ctx.logger ?? console);
 			try {
 				helper.start();
-				helpers.set(pet.id, {
+				helpers.set(job.key, {
 					helper,
-					size: pet.size
+					size: job.size
 				});
-				ctx.logger?.info?.(`dsh-pet desktop helper started (config: ${configUrl})`);
+				ctx.logger?.info?.(`dsh-pet desktop helper started (${overlay ? "single window" : job.key}; config: ${configUrl})`);
 			} catch (e) {
 				ctx.logger?.warn?.(`dsh-pet desktop helper start failed: ${e instanceof Error ? e.message : String(e)}`);
 			}
@@ -3055,7 +3074,20 @@ function apply(ctx) {
 		desktopSyncQueue = desktopSyncQueue.then(async () => {
 			refreshDesktop();
 			if (forceReload) await stopHelperAndWait("desktop-config-change");
-			else {
+			else if (desktopOverlayMode()) {
+				// 单窗口模式：页面按配置版本就地增删宠物，这里只管「一只都不剩就停、有了又没在跑就起」
+				const entry = helpers.get(OVERLAY_HELPER_KEY);
+				const stale = [...helpers.keys()].filter((key) => key !== OVERLAY_HELPER_KEY);
+				for (const key of stale) {
+					const old = helpers.get(key);
+					helpers.delete(key);
+					await old.helper.stopAndWait("desktop-mode-change");
+				}
+				if (entry && !hasDesktopPet) {
+					helpers.delete(OVERLAY_HELPER_KEY);
+					await entry.helper.stopAndWait("character-visibility-change");
+				}
+			} else {
 				const wanted = new Map(desktopPetList().map((pet) => [pet.id, pet.size]));
 				for (const [id, entry] of helpers) if (!wanted.has(id) || wanted.get(id) !== entry.size) {
 					helpers.delete(id);
@@ -4380,7 +4412,8 @@ async function run(logger, options) {
 				version: packageVersion(packageRoot)
 			},
 			port: portRef.value,
-			uptimeSec: Math.round(process.uptime())
+			uptimeSec: Math.round(process.uptime()),
+			desktopMode: desktopOverlayMode() ? "overlay" : "per-pet"
 		}),
 		onShutdown: () => forwardShutdown()
 	});

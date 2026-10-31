@@ -77,7 +77,15 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.setName('dsh-pet-electron-helper');
 // macOS：每个角色一个 Helper 进程，不隐藏的话每开一个角色 Dock 栏就多一个图标。
 if (process.platform === 'darwin') app.dock?.hide();
-if (process.env.DSH_PET_INSTANCE_ID) {
+/**
+ * 单窗口模式（宿主经 DSH_PET_OVERLAY=1 打开，目前只有 macOS 宿主会开）：本进程承载全部桌面宠物，
+ * 每块屏一个透明窗口（overlay-main.js / overlay.js）。不设时仍是每只宠物一个 helper、一个小窗口。
+ */
+const OVERLAY = process.env.DSH_PET_OVERLAY === '1' && process.env.DSH_PET_DPI_PROBE !== '1';
+if (OVERLAY) {
+  // 独立的 profile：每宠一窗的旧 profile 原样留着（切回旧模式时位置还在），旧位置只读不写
+  app.setPath('userData', path.join(app.getPath('appData'), 'dsh-pet-overlay'));
+} else if (process.env.DSH_PET_INSTANCE_ID) {
   const instance = process.env.DSH_PET_INSTANCE_ID.replace(/[^a-zA-Z0-9_-]/g, '_');
   app.setPath('userData', path.join(app.getPath('appData'), 'dsh-pet-character-' + instance));
 }
@@ -298,8 +306,11 @@ if (BRIDGE) {
 const windows = new Map();
 const { createRoleLogger } = require('./role-log.js');
 const roleLogs = new Map();
+/** 单窗口模式的控制面（startOverlay 的返回值）；每宠一窗模式下为 null */
+let overlay = null;
 ipcMain.on('pet:runtime-log', (event, payload) => {
-  const log = roleLogs.get(event.sender.id);
+  // 单窗口模式所有宠物共用一个页面，按渲染端带来的宠物 id 找日志
+  const log = roleLogs.get(event.sender.id) || overlay?.logFor(payload?.petId);
   const allowed = ['动画请求', '动画开始', '动画结束', '素材加载失败', '播放恢复', '角色销毁', '角色碰撞', '画幅适配'];
   if (!log || !allowed.includes(payload?.event)) return;
   const data = payload.details || {};
@@ -495,6 +506,7 @@ function guardFullScreen(win) {
 
 function guardAllFullScreen() {
   for (const win of windows.values()) guardFullScreen(win);
+  overlay?.onFullScreen(fullScreenDisplays);
 }
 
 function startFullScreenWatch() {
@@ -753,6 +765,41 @@ function createPetWindows() {
   }
 }
 
+/** 页面 query：两种模式共用的那部分（每宠一窗时 createPetWindows 自己拼，字段一致） */
+function pageQuery(geo) {
+  const area = geo.hull;
+  return {
+    configUrl: process.env.DSH_PET_CONFIG_URL || 'http://127.0.0.1:3080/dsh-pet-7340/config',
+    bridge: BRIDGE ? '1' : '0',
+    openTarget: OPEN_TARGET,
+    scale: String(petScale()),
+    workAreaW: String(area.width),
+    workAreaH: String(area.height),
+    workAreaX: String(area.x),
+    workAreaY: String(area.y),
+    areas: JSON.stringify(geo.areas),
+    workAreas: JSON.stringify(geo.workAreas),
+    topInsetRatio: String(geo.topInsetRatio),
+    panels: JSON.stringify(geo.panels),
+    primaryIndex: String(geo.primaryIndex),
+  };
+}
+
+/** 单窗口模式：一个页面承载全部桌面宠物（宠物名单由页面自己从配置读，不看 DSH_PET_PETS） */
+function startOverlayMode() {
+  const { startOverlay } = require('./overlay-main.js');
+  overlay = startOverlay({
+    electron: { app, BrowserWindow, ipcMain, screen, session: electronApi.session },
+    helperDir: __dirname,
+    scale: petScale(),
+    deskGeometry,
+    pageQuery,
+    createRoleLogger,
+    connectRole,
+    isPaused: () => pointerFallbackPaused,
+  });
+}
+
 // ---------- bridge 协议（渲染端 custom scheme → 本进程 → 宿主 stdout JSON 行 + 本地回调） ----------
 // 渲染端的每个 fetch 都落到 dsh-pet-bridge://，protocol.handle 把请求以一行 JSON 写 stdout 转发宿主。
 // 宿主应答**不走近 0 号管道**：Electron 主进程在 Windows 上收不到 piped stdin（electron#4218），
@@ -885,7 +932,8 @@ app.whenReady().then(() => {
     startBridgeCallback(); // 宿主应答回调服务器（stdin 在 Electron 主进程不可用，改走本地 HTTP）
   }
 
-  createPetWindows();
+  if (OVERLAY) startOverlayMode();
+  else createPetWindows();
   startFullScreenWatch();
 
   // 宠物窗口跟随：renderer 逐帧上报窗口内容区位置/尺寸
@@ -1052,6 +1100,7 @@ app.whenReady().then(() => {
     for (const win of windows.values()) {
       if (!win.isDestroyed()) win.webContents.send('pet:displays', geo);
     }
+    overlay?.onDisplays(geo);
     console.error('[dsh-pet-desktop-helper] displays changed: ' + JSON.stringify(geo));
     // 主屏缩放可能一起变了（它决定宠物的尺寸补偿）。线性化生效期间 screen API 只报被强制的值，
     // 真实值只能靠探测子进程拿；不一致就刷新缓存，下次启动自动用上。
@@ -1084,7 +1133,7 @@ app.whenReady().then(() => {
 
   // 冒烟自检模式（默认关闭）：DSH_PET_SMOKE=1 时延时截图到 DSH_PET_SMOKE_OUT 后退出，
   // 用于验证窗口/渲染/动画链路（如 CI 或本地验证）。
-  if (process.env.DSH_PET_SMOKE === '1') {
+  if (process.env.DSH_PET_SMOKE === '1' && !OVERLAY) {
     const smokeOut = process.env.DSH_PET_SMOKE_OUT || path.join(app.getPath('temp'), 'dsh-pet-smoke.png');
     const afterMs = Number(process.env.DSH_PET_SMOKE_AFTER_MS || 9000);
     const target = windows.values().next().value;
@@ -1316,7 +1365,12 @@ if (process.platform === 'darwin') {
     if (quickHiding) return;
     quickHiding = true;
     try {
-      const ids = petsFromEnv().map((pet) => pet.id);
+      // 单窗口模式只藏最后按过的那只（菜单栏里的「暂时隐藏这个角色」同理）；一只都没按过就不动
+      const ids = overlay ? [overlay.lastPetId()].filter(Boolean) : petsFromEnv().map((pet) => pet.id);
+      if (!ids.length) {
+        quickHiding = false;
+        return;
+      }
       const file = path.join(process.env.DSH_HOME || path.join(app.getPath('home'), '.dsh'), 'pet-control-client', 'quick-hidden.json');
       let listed = [];
       try { listed = JSON.parse(readFileSync(file, 'utf8')); } catch { /* none yet */ }
@@ -1326,6 +1380,8 @@ if (process.platform === 'darwin') {
         const res = await fetch(base + '/pet-display', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, display: 'none' }) });
         if (!res.ok) throw new Error('HTTP ' + res.status);
       }
+      // 每宠一窗时本进程随后就被宿主停掉；单窗口模式进程还在，要能再藏下一只
+      if (overlay) quickHiding = false;
     } catch (error) {
       console.error('[dsh-pet-desktop-helper] quick hide failed:', error);
       quickHiding = false;

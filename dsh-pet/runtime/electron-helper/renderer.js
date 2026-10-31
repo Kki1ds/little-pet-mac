@@ -84,6 +84,18 @@ async function boot() {
       scheduleReboot();
       return;
     }
+    if (Overlay) {
+      // 单窗口模式：本页面装下全部桌面宠物（每宠一窗的位置记录先导入一次，见 overlay.js）
+      await Overlay.importLegacyPositions();
+      for (const s of sprites) s.dispose();
+      sprites = pets.map((p) => new PetSprite(p));
+      Overlay.syncPets();
+      window.__dshPetDebug.configOk = true;
+      window.__dshPetDebug.spriteCount = sprites.length;
+      for (const s of sprites) s.playIdle();
+      startLoops();
+      return;
+    }
     // 本窗口只承载一只宠物：petIndex 由主进程按 DSH_PET_PETS 顺序注入
     const pet = CONFIG.petId ? pets.find((entry) => entry.id === CONFIG.petId) : pets[CONFIG.petIndex];
     if (!pet) {
@@ -134,6 +146,8 @@ function injectAssets() {
 if (window.petBridge && window.petBridge.onDisplays) {
   window.petBridge.onDisplays((geo) => {
     if (!applyDeskGeometry(geo)) return;
+    // 单窗口模式：先按新的屏幕列表收拾窗口（本页窗口可能换了屏、拔掉的屏的窗口要关），再重摆宠物
+    if (Overlay) Overlay.onDisplays();
     for (const s of sprites) s.relayout();
   });
 }

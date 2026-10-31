@@ -119,7 +119,41 @@ function decideWindowIgnore(bounds, point, ignoring, busy, offBodyMs = 0, input,
   return ignoring; // 余量区：保持（菜单/弹窗由 busy 覆盖）
 }
 
+/**
+ * 单窗口模式（little-pet-mac overlay）：拖拽租约时长（ms）。渲染端拖拽中每秒续一次；
+ * 超过这个时长没续（页面卡死 / 丢了松手）就当作松手，窗口恢复穿透——窗口盖着整块屏，绝不能一直挡着。
+ */
+const DRAG_LEASE_MS = 3000;
+
+function inRect(point, r) {
+  return !!r && point.x >= r.x && point.x < r.x + r.width && point.y >= r.y && point.y < r.y + r.height;
+}
+
+/**
+ * 单窗口模式：某块屏的透明窗口该不该穿透（= setIgnoreMouseEvents 的第一个参数）。
+ *
+ * 与 decideWindowIgnore 的区别：那里的窗口只比宠物大一圈，光标停在余量里时可以先「保持」；这里的窗口
+ * 盖着整块屏，除了宠物身体、菜单/对话框、以及在这块屏上按下的拖拽，**其余一律立刻穿透**。
+ *
+ * @param {object} s
+ * @param {{x:number,y:number}} s.point 真实光标（屏幕坐标）
+ * @param {{x:number,y:number,width:number,height:number}} s.bounds 这块屏的窗口矩形
+ * @param {Array<{x:number,y:number,width:number,height:number}>} [s.bodies] 画在这个窗口里的宠物身体命中区
+ * @param {Array<{x:number,y:number,width:number,height:number}>} [s.controls] 这个窗口里的菜单/对话框矩形
+ * @param {boolean} [s.dragging] 在这个窗口按下的拖拽仍在进行（租约未过期）
+ * @returns {boolean} 新的穿透状态
+ */
+function decideOverlayIgnore({ point, bounds, bodies, controls, dragging }) {
+  if (dragging) return false;
+  if (!point || !inRect(point, bounds)) return true;
+  if ((controls || []).some((r) => inRect(point, r))) return false;
+  if ((bodies || []).some((r) => inRect(point, r))) return false;
+  return true;
+}
+
 module.exports = {
+  DRAG_LEASE_MS,
+  decideOverlayIgnore,
   HIT_BOX,
   CANVAS_H,
   STAGE_W,
