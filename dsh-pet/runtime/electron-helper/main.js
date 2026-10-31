@@ -559,6 +559,41 @@ function startFullScreenWatch() {
   });
 }
 
+// ---------- 帧率探针：tools/macos/measure_pets.py 写请求文件，页面限时统计帧间隔与视频丢帧 ----------
+// 平时只有一个每秒一次的 stat（fs.watchFile），不跑任何渲染端逻辑。两种窗口模式同一套口径，
+// 结果按 helper 实例写进 frame-probe/<实例>.json，测量脚本据此对比两种模式的卡顿。
+function startFrameProbeWatch() {
+  const dir = path.join(process.env.DSH_HOME || path.join(app.getPath('home'), '.dsh'), 'pet-control-client');
+  const request = path.join(dir, 'frame-probe-request.json');
+  const instance = (OVERLAY ? 'overlay' : process.env.DSH_PET_INSTANCE_ID || 'main').replace(/[^a-zA-Z0-9_-]/g, '_');
+  let lastId = '';
+  const check = () => {
+    let req;
+    try {
+      req = JSON.parse(readFileSync(request, 'utf8'));
+    } catch {
+      return;
+    }
+    const ms = Number(req?.until) - Date.now();
+    if (typeof req?.id !== 'string' || !req.id || req.id === lastId || !(ms > 1000)) return;
+    lastId = req.id;
+    const pages = overlay ? overlay.windows().slice(0, 1) : [...windows.values()];
+    for (const win of pages) if (!win.isDestroyed()) win.webContents.send('pet:frame-probe', { id: req.id, ms });
+  };
+  const { watchFile, unwatchFile, mkdirSync } = require('node:fs');
+  watchFile(request, { interval: 1000 }, check);
+  app.on('will-quit', () => unwatchFile(request));
+  ipcMain.on('pet:frame-probe-result', (_event, result) => {
+    if (!result || typeof result.id !== 'string') return;
+    try {
+      mkdirSync(path.join(dir, 'frame-probe'), { recursive: true });
+      writeFileSync(path.join(dir, 'frame-probe', instance + '.json'), JSON.stringify({ ...result, instance, at: Date.now() }));
+    } catch (error) {
+      console.error('[dsh-pet-desktop-helper] frame probe result:', error.message);
+    }
+  });
+}
+
 /**
  * 桌面宠物列表（[{id,size}]）：宿主经 DSH_PET_PETS 透传（每只宠物一个窗口）。
  * 解析失败/未透传（手动 start-desktop）时回落到单个默认宠物窗口；renderer 首帧发来的
@@ -935,6 +970,7 @@ app.whenReady().then(() => {
   if (OVERLAY) startOverlayMode();
   else createPetWindows();
   startFullScreenWatch();
+  startFrameProbeWatch();
 
   // 宠物窗口跟随：renderer 逐帧上报窗口内容区位置/尺寸
   ipcMain.on('pet:set-bounds', (event, bounds) => {

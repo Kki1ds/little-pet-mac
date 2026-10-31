@@ -107,4 +107,11 @@ contextBridge.exposeInMainWorld('petBridge', {
   onDisplays(cb) {
     ipcRenderer.on('pet:displays', (e, geo) => cb(geo));
   },
+  // 帧率探针（tools/macos/measure_pets.py 触发）：限时统计动画帧间隔与视频丢帧，结果交主进程落盘
+  onFrameProbe(cb) {
+    ipcRenderer.on('pet:frame-probe', (e, req) => cb(req));
+  },
+  frameProbeResult(result) {
+    ipcRenderer.send('pet:frame-probe-result', result);
+  },
 });

@@ -163,5 +163,74 @@ window.addEventListener('resize', () => {
   }
 });
 
+// ---------- 帧率探针（tools/macos/measure_pets.py 经主进程触发；平时不跑） ----------
+// 限时跑一个 rAF 记帧间隔（主线程或合成卡住时间隔会变长），并统计各视频的丢帧数；
+// 两种窗口模式同一套口径，结束后交主进程写进 ~/.dsh/pet-control-client/frame-probe/。
+let frameProbeId = '';
+if (window.petBridge && window.petBridge.onFrameProbe) {
+  window.petBridge.onFrameProbe((req) => {
+    if (!req || typeof req.id !== 'string' || !req.id || req.id === frameProbeId) return;
+    frameProbeId = req.id;
+    runFrameProbe(req.id, Math.min(Math.max(Number(req.ms) || 0, 1000), 300000));
+  });
+}
+
+function videoQuality() {
+  const out = new Map();
+  for (const s of sprites) {
+    for (const v of [s.videoA, s.videoB]) {
+      const q = v && typeof v.getVideoPlaybackQuality === 'function' ? v.getVideoPlaybackQuality() : null;
+      if (q) out.set(v, { src: v.currentSrc, dropped: q.droppedVideoFrames, total: q.totalVideoFrames });
+    }
+  }
+  return out;
+}
+
+function runFrameProbe(id, ms) {
+  const startVideos = videoQuality();
+  const startMigrations = Overlay ? Overlay.migrations : 0;
+  const gaps = [];
+  const t0 = performance.now();
+  let last = 0;
+  const step = (now) => {
+    if (last) gaps.push(now - last);
+    last = now;
+    if (now - t0 < ms) {
+      requestAnimationFrame(step);
+      return;
+    }
+    // 片源换过（切动作 / 换窗口重载）的视频，计数从新片源算起
+    let dropped = 0;
+    let total = 0;
+    for (const [v, end] of videoQuality()) {
+      const start = startVideos.get(v);
+      const same = start && start.src === end.src && end.total >= start.total;
+      dropped += same ? end.dropped - start.dropped : end.dropped;
+      total += same ? end.total - start.total : end.total;
+    }
+    const sorted = gaps.slice().sort((a, b) => a - b);
+    const at = (p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] : 0);
+    const p50 = at(0.5);
+    const round = (x) => Math.round(x * 10) / 10;
+    window.petBridge.frameProbeResult({
+      id,
+      mode: Overlay ? 'overlay' : 'per-pet',
+      pets: sprites.map((s) => s.pet.id),
+      seconds: round((performance.now() - t0) / 1000),
+      frames: gaps.length,
+      p50: round(p50),
+      p95: round(at(0.95)),
+      p99: round(at(0.99)),
+      max: round(sorted.length ? sorted[sorted.length - 1] : 0),
+      // 一帧拖成两帧以上算一次卡顿
+      hitches: gaps.filter((g) => g > p50 * 1.8).length,
+      videoDropped: dropped,
+      videoTotal: total,
+      migrations: Overlay ? Overlay.migrations - startMigrations : 0,
+    });
+  };
+  requestAnimationFrame(step);
+}
+
 injectAssets();
 void boot();

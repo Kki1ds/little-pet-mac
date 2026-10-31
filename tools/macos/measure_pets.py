@@ -14,13 +14,78 @@ and its GPU / renderer / utility children). The control console and the pet serv
 counted; they are the same in both modes. WindowServer is reported on its own line: it is
 shared by every app, but moving windows and large transparent windows show up there.
 
-CPU is the average over the sample (100% = one core). Memory is the physical footprint that
-Activity Monitor shows in its Memory column. Uses only the system tools `ps` and `top`.
+CPU is the average over the sample (100% = one core), also split by process kind: a single
+process near 100% is saturated even when the total looks fine. Memory is the physical footprint
+that Activity Monitor shows in its Memory column.
+
+Smoothness: during the sample the pet page counts its animation frame intervals and the video
+frames it dropped (the helpers pick up a request file in ~/.dsh/pet-control-client within a
+second). Make the pets do what feels choppy (drag them, throw them into each other) while it runs.
+
+Uses only the system tools `ps` and `top`.
 """
 from pathlib import Path
-import argparse, json, re, subprocess, sys, time, urllib.request
+import argparse, json, os, re, subprocess, sys, time, urllib.request
 
 HELPER_MARK = 'electron-helper/main.js'
+
+
+CLIENT_DIR = Path(os.environ.get('DSH_HOME') or Path.home() / '.dsh') / 'pet-control-client'
+
+
+def kind(command):
+    m = re.search(r'--type=([\w-]+)', command)
+    if not m:
+        return 'main'
+    return {'gpu-process': 'GPU', 'renderer': 'renderer', 'utility': 'utility'}.get(m.group(1), m.group(1))
+
+
+def request_probe(seconds):
+    """Ask the pet pages to count frames for the sample; returns the request id (None if not possible)."""
+    if not CLIENT_DIR.is_dir():
+        return None
+    probe_id = str(int(time.time() * 1000))
+    until = int((time.time() + seconds) * 1000)
+    (CLIENT_DIR / 'frame-probe-request.json').write_text(json.dumps({'id': probe_id, 'until': until}), 'utf-8')
+    return probe_id
+
+
+def read_probe(probe_id, helpers, wait=8):
+    """Results written by the helpers for this request: {instance: result}."""
+    results = {}
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        for file in (CLIENT_DIR / 'frame-probe').glob('*.json'):
+            try:
+                r = json.loads(file.read_text('utf-8'))
+            except (OSError, ValueError):
+                continue
+            if r.get('id') == probe_id:
+                results[file.stem] = r
+        if len(results) >= helpers:
+            break
+        time.sleep(0.5)
+    return results
+
+
+def summarize_probe(results):
+    if not results:
+        return None
+    rs = list(results.values())
+    frames = sum(r.get('frames', 0) for r in rs)
+    total = sum(r.get('videoTotal', 0) for r in rs)
+    dropped = sum(r.get('videoDropped', 0) for r in rs)
+    return {
+        'pages': len(rs),
+        'frames': frames,
+        'frame_p50_ms': max(r.get('p50', 0) for r in rs),
+        'frame_p95_ms': max(r.get('p95', 0) for r in rs),
+        'frame_worst_ms': max(r.get('max', 0) for r in rs),
+        'hitches': sum(r.get('hitches', 0) for r in rs),
+        'video_dropped': dropped,
+        'video_frames': total,
+        'display_moves': sum(r.get('migrations', 0) for r in rs),
+    }
 
 
 def processes():
@@ -100,30 +165,53 @@ def main():
         sys.exit('No pet helpers are running. Start 小小桌宠 and show at least one pet.')
     mode = host_mode()
     print(f'Mode: {mode}; {len(roots)} helper(s), {len(members)} processes. Sampling for {args.seconds} s ...', flush=True)
+    probe_id = request_probe(args.seconds)
     started = time.time()
     stats = sample(args.seconds)
     # Helpers that restarted during the sample would be counted twice or missed: say so.
-    roots_after, members_after = pet_processes(processes())
+    table_after = processes()
+    roots_after, members_after = pet_processes(table_after)
     if set(roots_after) != set(roots):
         print('Warning: the pet helpers changed during the sample (a pet was shown/hidden or the mode switched). Measure again.')
     members &= members_after
 
     cpu = sum(stats[p][0] for p in members if p in stats)
     mem = sum(stats[p][1] for p in members if p in stats)
+    by_kind = {}
+    for p in members:
+        if p in stats:
+            k = kind(table_after[p][1])
+            by_kind[k] = by_kind.get(k, 0) + stats[p][0]
+    busiest = max((p for p in members if p in stats), key=lambda p: stats[p][0], default=None)
     window_server = [v for v in stats.values() if v[2].startswith('WindowServer')]
     ws_cpu = window_server[0][0] if window_server else None
+    frames = summarize_probe(read_probe(probe_id, len(roots))) if probe_id else None
     result = {
         'mode': mode,
         'helpers': len(roots),
         'processes': len(members),
         'seconds': round(time.time() - started),
         'cpu_percent': round(cpu, 1),
+        'cpu_by_kind': {k: round(v, 1) for k, v in sorted(by_kind.items(), key=lambda kv: -kv[1])},
+        'busiest_process': {'kind': kind(table_after[busiest][1]), 'cpu_percent': stats[busiest][0]} if busiest else None,
         'memory_mb': round(mem),
         'window_server_cpu_percent': ws_cpu,
+        'frames': frames,
     }
     print(f'Pets:         CPU {result["cpu_percent"]}%   memory {result["memory_mb"]} MB   ({len(roots)} helper(s), {len(members)} processes)')
+    print('  by kind:    ' + '   '.join(f'{k} {v}%' for k, v in result['cpu_by_kind'].items()))
+    if busiest:
+        print(f'  busiest:    one {result["busiest_process"]["kind"]} process at {result["busiest_process"]["cpu_percent"]}% (100% = a full core)')
     if ws_cpu is not None:
         print(f'WindowServer: CPU {ws_cpu}%   (shared by all apps)')
+    if frames:
+        rate = f'{frames["video_dropped"] / frames["video_frames"] * 100:.1f}%' if frames['video_frames'] else 'n/a'
+        print(f'Frames:       interval p50 {frames["frame_p50_ms"]} ms, p95 {frames["frame_p95_ms"]} ms, worst {frames["frame_worst_ms"]} ms; '
+              f'{frames["hitches"]} hitches (a frame that took two or more)')
+        print(f'  video:      {frames["video_dropped"]} of {frames["video_frames"]} frames dropped ({rate})'
+              + (f'; {frames["display_moves"]} moves between displays' if mode == 'overlay' else ''))
+    elif probe_id:
+        print('Frames:       no answer from the pet pages (an older build, or the pets were restarting)')
     if args.save:
         args.save.write_text(json.dumps(result, ensure_ascii=False, indent=1) + '\n', 'utf-8')
         print(f'Saved to {args.save}')

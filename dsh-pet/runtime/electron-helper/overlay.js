@@ -176,6 +176,8 @@ function createOverlay() {
   }
 
   // ---------- 搬家：元素移进另一块屏的窗口 ----------
+  /** 搬家次数（帧率探针用：卡顿是否集中在跨屏时） */
+  let migrations = 0;
   function move(s, entry) {
     const from = s.overlay;
     syncStyles(entry);
@@ -185,13 +187,23 @@ function createOverlay() {
       return;
     }
     const front = s.front === 0 ? s.videoA : s.videoB;
+    const back = front === s.videoA ? s.videoB : s.videoA;
     const freeze = freezeFrame(front, entry.doc);
+    // 后台那条视频是上一个动作（已暂停、看不见）：不跟着重载，清掉片源省一次解码器重建，
+    // 下次切动作时 switchTo 会给它设新片源。正在加载下一个动作（pending）时它马上要上前台，照常重载。
+    if (back && !s.pending && back.getAttribute('src')) {
+      back.onended = null;
+      back.onerror = null;
+      back.removeAttribute('src');
+      back.load();
+    }
     const videos = [s.videoA, s.videoB].map((v) => ({
       v,
       time: v.currentTime,
       playing: !v.paused && !v.ended,
       front: v === front,
     }));
+    migrations += 1;
     if (s.menuOpen) s.closeMenu(); // 菜单挂在旧窗口里，跟不过去
     // 拖拽中搬家：元素离开按下时的 document，指针捕获随之失效（之后 lostpointercapture 不算松手，
     // 指针事件由按下时那个窗口的 window 级监听转交，见 installHooks）
@@ -535,6 +547,9 @@ function createOverlay() {
     },
     get entries() {
       return entries;
+    },
+    get migrations() {
+      return migrations;
     },
   };
 }
