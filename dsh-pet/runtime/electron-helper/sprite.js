@@ -269,7 +269,6 @@ class PetSprite {
     // 注意：退订由窗口销毁自然回收（webContents 销毁后 ipc 事件不再派发），无需显式取消。
     this.others = {}; // petId -> {x,y,vx,vy,size,bottomPad}（其它宠物的最新状态，来自主进程广播）
     this.throwState = null; // 飞行中的实时状态（被撞查询 / 其它窗碰撞检测时上报用）
-    this.pressScoreFired = false; // 按下瞬间已触发过积分（pointerdown 即触发；click 据此不重复弹，同浏览器）
     this.lastFlightReport = 0;
     if (window.petBridge && window.petBridge.onFlightStates) {
       window.petBridge.onFlightStates((states) => {
@@ -1018,36 +1017,7 @@ class PetSprite {
         ' |v|=' +
         (grabState ? Math.round(Math.hypot(grabState.vx, grabState.vy)) : 0),
     );
-    // 点击积分：**按下瞬间即触发**（不等松开）。读取 stopThrow 之前的飞行速度，
-    // 在飞行中且达标 → 立即粒子爆发 + 积分弹窗；pressScoreFired 标记本次按下已触发，
-    // 松开的 click 据此不再重复弹、也不再播普通点击动画（与浏览器同构）。
-    this.pressScoreFired = false;
-    if (grabState) {
-      const grabSpeed = Math.hypot(grabState.vx, grabState.vy);
-      if (grabSpeed >= S.SCORE_MIN_SPEED) {
-        this.pressScoreFired = true;
-        console.log(
-          '[dsh-pet] ' +
-            new Date().toTimeString().slice(0, 8) +
-            ' pet=' +
-            this.pet.id +
-            ' click-score speed=' +
-            Math.round(grabSpeed) +
-            ' size=' +
-            this.size +
-            ' -> +' +
-            S.clickScore(grabSpeed, this.size),
-        );
-        S.spawnScoreBurst(e.clientX, e.clientY);
-        S.mountScorePopup({
-          x: e.clientX,
-          y: e.clientY,
-          score: S.clickScore(grabSpeed, this.size),
-          speed: grabSpeed,
-          size: this.pet.size,
-        });
-      }
-    }
+    // 桌面版不做点击积分：飞行中按住只是抓住它（上游会弹粒子和积分卡片，弹出时会卡一下，little-pet-mac 去掉了）
     this.stopThrow(); // 空中抓取：从当前落点开始新拖拽（this.pos 实时）
     this.stopDragFollow();
     this.stopMove();
@@ -1370,14 +1340,6 @@ class PetSprite {
   onClick() {
     const d = this.dragState;
     if (d.active || d.dragging || this.justDragged) return;
-    // 积分判定已在 onPointerDown（按下即触发）完成：
-    // 本次按下已触发过积分 → 只收手停住、**不**再播普通点击动画（粒子+弹窗即反馈，与浏览器同构）
-    if (this.pressScoreFired) {
-      this.pressScoreFired = false;
-      this.stopThrow();
-      this.stopMove();
-      return;
-    }
     this.stopThrow(); // 点击飞行中的宠物 = 收手停住（再播点击回应）
     this.stopMove();
     if (!this.animations.clicks.length) return;
