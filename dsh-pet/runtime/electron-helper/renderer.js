@@ -175,19 +175,31 @@ if (window.petBridge && window.petBridge.onFrameProbe) {
   });
 }
 
-function videoQuality() {
-  const out = new Map();
-  for (const s of sprites) {
-    for (const v of [s.videoA, s.videoB]) {
-      const q = v && typeof v.getVideoPlaybackQuality === 'function' ? v.getVideoPlaybackQuality() : null;
-      if (q) out.set(v, { src: v.currentSrc, dropped: q.droppedVideoFrames, total: q.totalVideoFrames });
+/** 各视频的丢帧/总帧累计（计数器在片源重载时归零：读数变小就从新的读数接着加） */
+function videoCounter() {
+  const last = new Map();
+  const sum = { dropped: 0, total: 0 };
+  const sample = () => {
+    for (const s of sprites) {
+      for (const v of [s.videoA, s.videoB]) {
+        const q = v && typeof v.getVideoPlaybackQuality === 'function' ? v.getVideoPlaybackQuality() : null;
+        if (!q) continue;
+        const prev = last.get(v);
+        if (prev) {
+          sum.dropped += q.droppedVideoFrames >= prev.dropped ? q.droppedVideoFrames - prev.dropped : q.droppedVideoFrames;
+          sum.total += q.totalVideoFrames >= prev.total ? q.totalVideoFrames - prev.total : q.totalVideoFrames;
+        }
+        last.set(v, { dropped: q.droppedVideoFrames, total: q.totalVideoFrames });
+      }
     }
-  }
-  return out;
+    return sum;
+  };
+  sample();
+  return sample;
 }
 
 function runFrameProbe(id, ms) {
-  const startVideos = videoQuality();
+  const sampleVideo = videoCounter();
   const startMigrations = Overlay ? Overlay.migrations : 0;
   const gaps = [];
   const t0 = performance.now();
@@ -195,19 +207,12 @@ function runFrameProbe(id, ms) {
   const step = (now) => {
     if (last) gaps.push(now - last);
     last = now;
+    if (gaps.length % 6 === 0) sampleVideo();
     if (now - t0 < ms) {
       requestAnimationFrame(step);
       return;
     }
-    // 片源换过（切动作 / 换窗口重载）的视频，计数从新片源算起
-    let dropped = 0;
-    let total = 0;
-    for (const [v, end] of videoQuality()) {
-      const start = startVideos.get(v);
-      const same = start && start.src === end.src && end.total >= start.total;
-      dropped += same ? end.dropped - start.dropped : end.dropped;
-      total += same ? end.total - start.total : end.total;
-    }
+    const video = sampleVideo();
     const sorted = gaps.slice().sort((a, b) => a - b);
     const at = (p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] : 0);
     const p50 = at(0.5);
@@ -224,8 +229,8 @@ function runFrameProbe(id, ms) {
       max: round(sorted.length ? sorted[sorted.length - 1] : 0),
       // 一帧拖成两帧以上算一次卡顿
       hitches: gaps.filter((g) => g > p50 * 1.8).length,
-      videoDropped: dropped,
-      videoTotal: total,
+      videoDropped: video.dropped,
+      videoTotal: video.total,
       migrations: Overlay ? Overlay.migrations - startMigrations : 0,
     });
   };

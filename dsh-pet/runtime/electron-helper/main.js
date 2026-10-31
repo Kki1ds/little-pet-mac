@@ -565,7 +565,9 @@ function startFullScreenWatch() {
 function startFrameProbeWatch() {
   const dir = path.join(process.env.DSH_HOME || path.join(app.getPath('home'), '.dsh'), 'pet-control-client');
   const request = path.join(dir, 'frame-probe-request.json');
-  const instance = (OVERLAY ? 'overlay' : process.env.DSH_PET_INSTANCE_ID || 'main').replace(/[^a-zA-Z0-9_-]/g, '_');
+  // 一个文件一个页面：单窗口模式只有一个页面；其余每只宠物一个页面（一个 helper 里可能有好几只）
+  const fileFor = (result) =>
+    (OVERLAY ? 'overlay' : 'pet-' + String(result.pets?.[0] ?? process.env.DSH_PET_INSTANCE_ID ?? 'main')).replace(/[^a-zA-Z0-9_-]/g, '_');
   let lastId = '';
   const check = () => {
     let req;
@@ -587,7 +589,8 @@ function startFrameProbeWatch() {
     if (!result || typeof result.id !== 'string') return;
     try {
       mkdirSync(path.join(dir, 'frame-probe'), { recursive: true });
-      writeFileSync(path.join(dir, 'frame-probe', instance + '.json'), JSON.stringify({ ...result, instance, at: Date.now() }));
+      const name = fileFor(result);
+      writeFileSync(path.join(dir, 'frame-probe', name + '.json'), JSON.stringify({ ...result, page: name, at: Date.now() }));
     } catch (error) {
       console.error('[dsh-pet-desktop-helper] frame probe result:', error.message);
     }
