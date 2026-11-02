@@ -139,9 +139,14 @@ def write_stub(base, name, source):
 
 
 def add_mov_clips(characters, cache):
-    """Encode every character's .webm to HEVC-alpha .mov (cached between builds) and add them to the app."""
+    """Encode every character's .webm to HEVC-alpha .mov (cached between builds) and ship the .mov instead.
+
+    The .webm in characters/ stay the source; the app gets only the .mov of each clip (hardware
+    decoded, about half the CPU of the software-decoded VP9). The pets still fall back to a .webm
+    when a clip has no .mov, e.g. clips the user adds under ~/.dsh.
+    """
     if not shutil.which('ffmpeg') and not Path('/opt/homebrew/bin/ffmpeg').exists():
-        print('ffmpeg not found: building without .mov clips (brew install ffmpeg to add them)', flush=True)
+        print('ffmpeg not found: building with the .webm clips (brew install ffmpeg for the lighter .mov)', flush=True)
         return
     for char in sorted(p for p in (ROOT / 'characters').iterdir() if (p / 'animations').is_dir()):
         out = cache / char.name
@@ -150,6 +155,7 @@ def add_mov_clips(characters, cache):
         for mov in out.glob('*.mov'):
             if (char / 'animations' / (mov.stem + '.webm')).exists():
                 shutil.copy2(mov, dest / mov.name)
+                (dest / (mov.stem + '.webm')).unlink()
         # The client replaces seeded .mov files whenever this stamp changes (client/service.cjs syncMov).
         # It only changes when a clip is re-encoded, so ordinary rebuilds don't recopy everything.
         newest = max((m.stat().st_mtime_ns for m in out.glob('*.mov')), default=0)
@@ -167,7 +173,7 @@ def main():
     parser.add_argument('--output', type=Path, help='new folder to create (default outputs/macos/<timestamp>)')
     parser.add_argument('--sign', default='-', metavar='IDENTITY', help='codesign identity, e.g. "Developer ID Application: Name (TEAMID)"; default ad-hoc')
     parser.add_argument('--dmg', action='store_true', help='also pack a .dmg next to the app')
-    parser.add_argument('--mov', action='store_true', help='also encode HEVC-alpha .mov clips (hardware decoded, lighter on CPU; the cache in outputs/macos/.cache is reused). Without it the pets play the .webm clips')
+    parser.add_argument('--webm', action='store_true', help='ship the .webm clips as they are instead of encoding them to HEVC-alpha .mov (the .mov are hardware decoded and lighter on CPU; their cache in outputs/macos/.cache is reused between builds)')
     parser.add_argument('--notarize', metavar='PROFILE', help='notarize and staple the .dmg with this notarytool keychain profile (needs --sign and --dmg)')
     args = parser.parse_args()
     if args.notarize and (args.sign == '-' or not args.dmg):
@@ -220,8 +226,8 @@ def main():
     write_stub(engine, '@electron/get', "export async function downloadArtifact(){throw new Error('小小桌宠 macOS 版不下载 Electron');}\n")
     write_stub(engine, '@electron-internal/extract-zip', "export default async function extract(){throw new Error('小小桌宠 macOS 版不解压 Electron');}\n")
     shutil.copytree(ROOT / 'characters', res / 'characters')
-    if args.mov:
-        add_mov_clips(res / 'characters', cache / 'mov-q75-a100-pm-601-srgb')  # new folder when encoder settings change
+    if not args.webm:
+        add_mov_clips(res / 'characters', cache / 'mov-q75-a90-w960-pm-601-srgb')  # new folder when encoder settings change
 
     sign(app, args.sign, out)
     run('codesign', '--verify', '--deep', '--strict', app)

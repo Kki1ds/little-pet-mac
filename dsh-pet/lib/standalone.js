@@ -3750,7 +3750,11 @@ function apply(ctx) {
 		// project folder holds the config and only clips that override or add to the bundled ones.
 		const bundledRoot = process.env.DSH_PET_BUNDLED_CHARACTERS;
 		const bundledAnimDir = bundledRoot ? resolveAsset(bundledRoot, characterDir(petId) + "/animations") : void 0;
-		const fromBundle = () => bundledAnimDir !== void 0 && existsSync(bundledAnimDir) ? resolveExisting(bundledAnimDir, fileName) : void 0;
+		// The Mac build ships only .mov clips and the pets ask for the .mov first. A .webm the user put in
+		// the project folder under the same name overrides the bundled clip: answer 404 for the .mov so the
+		// pet falls back to that .webm.
+		const userWebm = () => ext === ".mov" && projectAnimDir !== void 0 && existsSync(projectAnimDir) && resolveExisting(projectAnimDir, fileName.slice(0, -4) + ".webm") !== void 0;
+		const fromBundle = () => bundledAnimDir !== void 0 && existsSync(bundledAnimDir) && !userWebm() ? resolveExisting(bundledAnimDir, fileName) : void 0;
 		const file = projectAnimDir !== void 0 && existsSync(projectAnimDir) ? resolveExisting(projectAnimDir, fileName) ?? fromBundle() : fromBundle() ?? (extraAnimDir !== void 0 && existsSync(extraAnimDir) ? resolveExisting(extraAnimDir, fileName) : resolveExisting(userRootFor(ext), fileName) ?? resolveExisting(assetRootFor(ext), fileName));
 		if (file === void 0) return {
 			kind: "text",

@@ -12,9 +12,26 @@ python3 tools/macos/build_macos.py
 
 脚本会下载 Electron 43.3.0（darwin-arm64，先试 npmmirror，再试 GitHub，均校验 SHA256），在 `outputs/macos/<时间戳>/` 下生成新的 `小小桌宠.app` 并做本地 ad-hoc 签名。每次都写入新目录，不会覆盖旧构建或 `/Applications`。已经下载好的 Electron 压缩包可用 `--electron-zip` 指定。
 
+## 动画素材（HEVC）
+
+仓库里的 `characters/<角色>/animations/*.webm`（VP9 透明视频）是素材源。构建时会把它们逐个转成 HEVC 透明 `.mov`，安装包里只放 `.mov`，不放 `.webm`。
+
+- **为什么用 HEVC**：VP9 靠 CPU 软解，HEVC 由硬件解码。实测同一段动作单独播放，一只桌宠从 23–29% 降到约 13%。
+- **转码参数**：超过 960 宽的片段缩到 960 宽（桌宠显示宽度约 480pt，凑近屏幕才看得出一点差别），透明通道质量 0.9（0.75 时边缘会有杂点）。
+- **构建要求**：需要 `ffmpeg`（`brew install ffmpeg`）和 Xcode 命令行工具。第一次构建要把全部片段转一遍，大约几分钟；结果缓存在 `outputs/macos/.cache/mov-…/`，之后只转新增或改过的片段。没有 ffmpeg 时会照旧打包 `.webm`，加 `--webm` 也能强制打包 `.webm`。
+- **新增素材**：把 `.webm` 放进 `characters/<角色>/animations/`，在 `config.json` 里写上动作名，重新构建即可。想单独转一段先看效果：
+
+  ```sh
+  python tools/macos/hevc/encode_mov.py characters/Claude/animations/新动作.webm --out-dir outputs/mov-test
+  ```
+
+  不加 `--out-dir` 时，`.mov` 会写在 `.webm` 旁边，不要提交进仓库。
+- **画幅**：小克、白龙、Grok 的 1280 宽片段转成 960 宽后，`canvas-layout.js` 会按 1280 原片的坐标排版，脚底对齐不受影响。以后给这三个角色加新画幅时，在 `feetLines` 里按 1280 原片补实测值。
+- **颜色**：现在的标记方式（BT.709 矩阵加 sRGB 曲线）在屏幕上逐像素比，和 webm 平均只差 2–3 级（满分 255）。改成 709 曲线会整体偏亮约 6 级，不要改。
+
 ## 与 Windows 版的区别
 
-- 数据目录：`~/.dsh/dsh-pet/characters`，客户端设置和日志在 `~/.dsh/pet-control-client`。内置角色的动画只在 .app 里（客户端通过 `DSH_PET_BUNDLED_CHARACTERS` 告诉宿主），`~/.dsh` 里每个角色只有一个配置文件；自己新建 `<角色>/animations` 放进同名片段可以覆盖内置的。旧版本复制出来的、与 .app 相同的片段和人设文件会在启动时自动删掉（精简版不用人设）。
+- 数据目录：`~/.dsh/dsh-pet/characters`，客户端设置和日志在 `~/.dsh/pet-control-client`。内置角色的动画只在 .app 里（客户端通过 `DSH_PET_BUNDLED_CHARACTERS` 告诉宿主），`~/.dsh` 里每个角色只有一个配置文件；自己新建 `<角色>/animations` 放进同名片段（`.webm` 即可）可以覆盖内置的 `.mov`。旧版本复制出来的、与 .app 相同的片段和人设文件会在启动时自动删掉（精简版不用人设）。
 - 宿主服务由 Electron 自带的 Node 运行（`ELECTRON_RUN_AS_NODE`），不附带 `node.exe`；引擎下载 Electron 用的两个依赖换成了空实现，打包后的应用不会下载 Electron。
 - 默认只在菜单栏显示（Info.plist 设 `LSUIElement`），Dock 里没有图标。点菜单栏图标可打开控制台、全部开启/隐藏或退出。
 - 控制台「在 Dock 栏显示图标」开关（或菜单栏菜单里的同名勾选项）可以把 Dock 图标加回来，设置存在 `~/.dsh/pet-control-client/mac-settings.json`，立即生效。
@@ -61,7 +78,7 @@ python tools/macos/measure_pets.py                         # 采样 30 秒
 python tools/macos/measure_pets.py --seconds 60 --save shared.json
 ```
 
-对比两种模式：先测一次，在菜单栏菜单里切换「所有角色共用一个进程（省资源）」，等宠物重新出现十几秒后再测一次。输出里的内存是活动监视器「内存」列的同一口径（物理占用），CPU 是采样期间的平均值（100% = 一个核），另按进程种类（主进程、渲染、GPU）拆开；WindowServer 单列一行，它被所有应用共用，但窗口移动和合成的开销会体现在那里。
+对比两种模式：先测一次，在菜单栏菜单里切换「所有角色共用一个进程（省资源）」，等宠物重新出现十几秒后再测一次。输出里的内存是活动监视器「内存」列的同一口径（物理占用），CPU 是采样期间的平均值（100% = 一个核），另按进程种类（主进程、渲染、GPU）拆开；WindowServer 单列一行，它被所有应用共用，但窗口移动和合成的开销会体现在那里。VTDecoder 一行是系统替 `.mov` 做硬件解码的开销，和 `.webm` 版比较时要把它加到桌宠的 CPU 上。
 
 采样期间每个宠物页面会统计动画帧间隔和视频丢帧（「Frames」一行：p95 越接近屏幕刷新间隔越顺，hitches 是一帧拖成两帧以上的次数）。测的时候把宠物拖来拖去、扔到一起撞，最能看出差别。
 

@@ -12,7 +12,9 @@ menu-bar icon's menu, wait about 15 seconds for the pets to come back, and measu
 What is counted: every process started for the pets (each `.../electron-helper/main.js` helper
 and its GPU / renderer / utility children). The control console and the pet service are not
 counted; they are the same in both modes. WindowServer is reported on its own line: it is
-shared by every app, but moving and compositing the pet windows shows up there.
+shared by every app, but moving and compositing the pet windows shows up there. So is
+VTDecoder, the system service that decodes the HEVC .mov clips in hardware: add it to the
+pets' CPU when comparing with a .webm build.
 
 CPU is the average over the sample (100% = one core), also split by process kind: a single
 process near 100% is saturated even when the total looks fine. Memory is the physical footprint
@@ -190,6 +192,9 @@ def main():
     busiest = max((p for p in members if p in stats), key=lambda p: stats[p][0], default=None)
     window_server = [v for v in stats.values() if v[2].startswith('WindowServer')]
     ws_cpu = window_server[0][0] if window_server else None
+    # The .mov clips are decoded in hardware through the system's VTDecoderXPCService processes (top
+    # cuts the name to 16 characters); that work is the pets' but is not under the helper.
+    vt_cpu = round(sum(v[0] for v in stats.values() if v[2].startswith('VTDecoderXPCServ')), 1)
     frames = summarize_probe(read_probe(probe_id)) if probe_id else None
     result = {
         'mode': mode,
@@ -201,12 +206,14 @@ def main():
         'busiest_process': {'kind': kind(table_after[busiest][1]), 'cpu_percent': stats[busiest][0]} if busiest else None,
         'memory_mb': round(mem),
         'window_server_cpu_percent': ws_cpu,
+        'video_decoder_cpu_percent': vt_cpu,
         'frames': frames,
     }
     print(f'Pets:         CPU {result["cpu_percent"]}%   memory {result["memory_mb"]} MB   ({len(roots)} helper(s), {len(members)} processes)')
     print('  by kind:    ' + '   '.join(f'{k} {v}%' for k, v in result['cpu_by_kind'].items()))
     if busiest:
         print(f'  busiest:    one {result["busiest_process"]["kind"]} process at {result["busiest_process"]["cpu_percent"]}% (100% = a full core)')
+    print(f'VTDecoder:    CPU {vt_cpu}%   (hardware decoding of the .mov clips; shared with other apps playing video)')
     if ws_cpu is not None:
         print(f'WindowServer: CPU {ws_cpu}%   (shared by all apps)')
     if frames:
