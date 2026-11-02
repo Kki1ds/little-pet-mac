@@ -96,7 +96,7 @@ function syncActions(entry,src,dest){
   const before=new Set(offered[entry]||[]),seen=new Set(offered[entry]||[]);
   const have=new Set(actionLists(cfg.animations).flatMap(([,v])=>v));for(const m of cfg.animations.moves?.actions||[])have.add(m.name);
   const lists=new Map(actionLists(cfg.animations));let changed=false;
-  const add=(name,push)=>{seen.add(name);if(before.has(name)||have.has(name))return;if(!fs.existsSync(path.join(src,'animations',name+'.webm')))return;push();have.add(name);changed=true;};
+  const add=(name,push)=>{seen.add(name);if(before.has(name)||have.has(name))return;if(!['.webm','.mov'].some(ext=>fs.existsSync(path.join(src,'animations',name+ext))))return;push();have.add(name);changed=true;};
   for(const [key,names] of actionLists(seed.animations))for(const name of names)add(name,()=>{
     if(!lists.has(key)){if(key.startsWith('category:')){const cat={...seed.animations.categories.find(c=>'category:'+c.id===key),actions:[]};(cfg.animations.categories??=[]).push(cat);lists.set(key,cat.actions);}
       else if(key.startsWith('event:')){const list=[];(cfg.animations.events??={})[key.slice(6)]=list;lists.set(key,list);}else{const list=[];cfg.animations[key]=list;lists.set(key,list);}}
@@ -181,9 +181,10 @@ async function list() {
   const config=await request(base+'/config');const roles=[];
   for(const [entry,cfg] of Object.entries(config))for(const pet of cfg.pets||[]){
     const preview=cfg.animations.idle[0];let file=path.join(projectDir(entry),'animations',preview+'.webm');
-    if(entry==='main'&&!fs.existsSync(file)&&!fs.existsSync(path.join(projectDir(entry),'animations')))file=path.join(PACKAGE,'assets/webm',preview+'.webm');
+    // The app's own characters/DeepSeek comes before the engine's copy of main's clips (the Mac build ships it as .mov).
+    if(entry==='main'&&!fs.existsSync(file)&&!fs.existsSync(path.join(projectDir(entry),'animations'))&&!(packaged&&fs.existsSync(path.join(SEED_ROOT,MAIN_DIR,'animations'))))file=path.join(PACKAGE,'assets/webm',preview+'.webm');
     if(packaged&&!fs.existsSync(file)&&!fs.existsSync(file.slice(0,-5)+'.mov'))file=path.join(SEED_ROOT,dirOf(entry),'animations',preview+'.webm');
-    // macOS: console previews play the hardware-decoded .mov when the build added one.
+    // macOS: console previews play the hardware-decoded .mov (the build ships only the .mov).
     const mov=file.slice(0,-5)+'.mov';if(process.platform==='darwin'&&fs.existsSync(mov))file=mov;
     let poster='';const posterFile=path.join(__dirname,'assets',entry+'.png');if(fs.existsSync(posterFile))poster='data:image/png;base64,'+fs.readFileSync(posterFile).toString('base64');
     roles.push({cloneCount:Math.max(0,cfg.pets.length-1),cloneLimit:8,isClone:pet.id!==cfg.pets[0].id&&/__clone_[1-8]$/.test(pet.id),id:pet.id,entry,name:pet.name||pet.id,visible:['desktop','both'].includes(pet.display),size:pet.size,actions:animationNames(cfg.animations),idle:preview,poster,project:entry==='main'&&!fs.existsSync(projectDir(entry))?path.join(HOME,'dsh-pet'):projectDir(entry),preview:fs.existsSync(file)?require('node:url').pathToFileURL(file).href:''});

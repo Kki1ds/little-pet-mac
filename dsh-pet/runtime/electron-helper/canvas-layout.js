@@ -12,8 +12,14 @@
     Grok: Object.freeze({ '1280x720':634, '1280x960':851 }),
     GPT: Object.freeze({ '1280x720':630, '1280x960':850 }),
   });
+  // The macOS build ships 1280-wide clips as 960-wide HEVC (tools/macos/hevc/encode_mov.py --max-width);
+  // a calibrated character's 960-wide clip is laid out in its 1280 master's pixels.
+  function master(width, height, assetRoot) {
+    return width===960 && feetLines[assetRoot] ? [1280, height*4/3] : [width, height];
+  }
   function layout(width, height, petSize, assetRoot) {
     if (![width,height,petSize].every(n=>Number.isFinite(n)&&n>0)) return null;
+    [width, height] = master(width, height, assetRoot);
     const feet = feetLines[assetRoot]?.[`${width}x${height}`];
     // 16:9 clips fill the stage; only a calibrated character needs a vertical shift.
     if (Math.abs(width*9-height*16)<1) {

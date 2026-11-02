@@ -4,12 +4,16 @@
 ffmpeg decodes each webm (libvpx-vp9 keeps the alpha) to premultiplied BGRA frames and
 scripts/hevc_alpha_encoder.swift encodes them with AVFoundation's
 hevcWithAlpha codec, the same pipeline as scripts/encode_hevc_alpha.sh but
-with each clip's own size and frame rate.
+with each clip's own size and frame rate. Clips wider than --max-width (default 960) are
+scaled down on the way: the pets show them about 480pt wide, and the HEVC is decoded in
+hardware, so the smaller encode only saves disk space and looks the same on screen.
 
     python tools/macos/hevc/encode_mov.py characters/Claude/animations/待机-翻书.webm
     python tools/macos/hevc/encode_mov.py characters/*/animations --out-dir same
 
-A .mov is written next to each .webm by default; --out-dir puts them elsewhere.
+The macOS build runs this for every character (build_macos.py) and ships only the .mov clips;
+the .webm files in characters/ stay the source. A .mov is written next to each .webm by default
+(do not commit it); --out-dir puts them elsewhere.
 Clips whose .mov is newer than the .webm are skipped.
 """
 from pathlib import Path
@@ -34,14 +38,23 @@ def probe(ffprobe, webm):
     return s['width'], s['height'], round(int(num) / int(den))
 
 
+def fit(width, height, max_width):
+    """Output size: at most max_width wide, same aspect, even dimensions (HEVC 4:2:0)."""
+    if width <= max_width:
+        return width, height
+    return max_width, round(height * max_width / width / 2) * 2
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('inputs', nargs='+', type=Path, help='.webm files or folders that contain them')
     parser.add_argument('--out-dir', type=Path, help='write the .mov files here instead of next to each .webm')
     parser.add_argument('--force', action='store_true', help='re-encode even when the .mov is up to date')
     parser.add_argument('--quality', type=float, default=0.75, help='colour quality 0-1 (default 0.75)')
-    parser.add_argument('--alpha-quality', type=float, default=1.0,
-                        help='alpha quality 0-1 (default 1.0; lower values leave speckles on the edges)')
+    parser.add_argument('--alpha-quality', type=float, default=0.9,
+                        help='alpha quality 0-1 (default 0.9; 0.75 left speckles on the edges)')
+    parser.add_argument('--max-width', type=int, default=960,
+                        help='scale wider clips down to this width (default 960; 0 keeps every clip at its own size)')
     parser.add_argument('--matrix', default='bt601', choices=['bt601', 'bt709'],
                         help='YUV matrix used to read the webm (default bt601, how Chromium shows the untagged webm)')
     parser.add_argument('--straight', action='store_true',
@@ -65,10 +78,11 @@ def main():
             if not args.force and mov.exists() and mov.stat().st_mtime > webm.stat().st_mtime:
                 skipped += 1
                 continue
-            w, h, fps = probe(ffprobe, webm)
-            print(f'[{i}/{len(webms)}] {webm.name} {w}x{h}@{fps}', flush=True)
+            src_w, src_h, fps = probe(ffprobe, webm)
+            w, h = fit(src_w, src_h, args.max_width) if args.max_width > 0 else (src_w, src_h)
+            print(f'[{i}/{len(webms)}] {webm.name} {src_w}x{src_h}@{fps}' + (f' -> {w}x{h}' if (w, h) != (src_w, src_h) else ''), flush=True)
             tmp_mov = mov.with_suffix('.tmp.mov')
-            vf = f'scale=in_color_matrix={args.matrix}:out_color_matrix={args.matrix},format=bgra'
+            vf = f'scale={w}:{h}:flags=lanczos:in_color_matrix={args.matrix}:out_color_matrix={args.matrix},format=bgra'
             if not args.straight:
                 vf += ',premultiply=inplace=1'
             dec = subprocess.Popen([ffmpeg, '-hide_banner', '-loglevel', 'error', '-c:v', 'libvpx-vp9', '-i', str(webm), '-an',
