@@ -1,0 +1,11 @@
+/* Mac additions on top of theme.css (kept apart so theme.css stays identical to the upstream 小小桌宠2 file). */
+:root{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue","Segoe UI Variable Text","Microsoft YaHei UI",sans-serif}
+/* theme.css leaves room for the Artemis logo above the connection status; this build has no logo. */
+.aside-bottom{margin-top:auto}
+.row[hidden]{display:none}
+.row-field{display:flex;align-items:center;gap:10px;color:var(--ink-soft);font-weight:700}
+.row-field input{width:84px;box-sizing:border-box;padding:8px 12px;border:2px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);font:inherit;font-weight:700;text-align:center}
+.row-field input:disabled{opacity:.55}
+.pill.small{padding:6px 14px;min-height:32px;font-size:13px}
+.row-note code{padding:1px 6px;border-radius:6px;background:var(--orange-soft);color:var(--orange-deep);font-size:12px}
+[data-mode=dark] .row-field input{background:#1f1825}

@@ -54,6 +54,9 @@ if(!app.requestSingleInstanceLock()){app.quit();}else if(process.argv.includes('
   handle('characters:list',()=>service.list());
   handle('rhythm:get',()=>service.restSeconds());
   handle('rhythm:set',value=>service.setRestSeconds(value));
+  handle('characters:collision',()=>service.collision());
+  handle('characters:set-collision',on=>service.setCollision(on));
+  handle('characters:reorder',entries=>service.reorder(entries).then(publishRoles));
   handle('characters:resize',(id,size)=>service.resize(id,size).then(publishRoles));
   handle('characters:clone',id=>service.clone(id).then(publishRoles));
   handle('characters:remove-clone',id=>service.clone(id,true).then(publishRoles));
