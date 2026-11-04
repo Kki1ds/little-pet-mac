@@ -14,6 +14,9 @@ const CHAT_TOOLS_ENABLED = false;
 // 松手时速度低于它就原地放下（px/s，CSS 像素）；高于它才算甩出去。引擎自带的 500 太敏感，放置时常被误判成抛掷。
 // （同步自上游小小桌宠2 的 engine-patch/sprite.js）
 const PLACE_FLING_SPEED = 1600;
+// 原地放下时，脚离屏幕底边（工作区底）不超过「角色宽度 × 此值」就让它落到地面：拖到屏幕下方会自动沉底。
+// 比这更高的位置照旧停在松手处。设为 0 关闭。
+const GROUND_SNAP_RATIO = 0.45;
 
 // 轻量版没有余额和碎碎念功能，它们的动画分类名会误导：合并成一组「其他动作」，动画照样能点播。
 function liteMenuTree(animations) {
@@ -1155,6 +1158,18 @@ class PetSprite {
         // startThrow 落定也按同一公式存），松手无边界夹取
         // 拖动时舞台被拍平、松手又下移 bottomPad：窗口同步上移同样的量，人物在屏幕上纹丝不动
         const at = placeTarget ? { x: placeTarget.x, y: placeTarget.y - this.bottomPad } : { x: px, y: py - this.bottomPad };
+        // 松手点靠近屏幕底边：零初速落到地面（重力 + 落地 Q 弹，落定后由 startThrow 写入 customPos）
+        if (GROUND_SNAP_RATIO > 0) {
+          const sp = this.throwSpaceOf();
+          const floor = sp.bounds[S.screenOfBox(sp, at.x, at.y)]?.maxY;
+          if (Number.isFinite(floor) && floor - at.y <= this.size * GROUND_SNAP_RATIO) {
+            // 先按松手位置摆好窗口（舞台已复位下移，窗口同步上移），再起落，避免首帧跳一下
+            this.customPos = { rx: (at.x + this.halfW) / VIEW.w, ry: (at.y + this.halfH) / VIEW.h };
+            this.position();
+            this.startThrow(at.x, at.y, 0, 0);
+            return;
+          }
+        }
         this.customPos = { rx: (at.x + this.halfW) / VIEW.w, ry: (at.y + this.halfH) / VIEW.h };
         this.position();
         // 释放后的最终窗口位置（position() 换算后，松手无夹取），冒烟断言"释放不位移"用
