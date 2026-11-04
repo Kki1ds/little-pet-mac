@@ -2,6 +2,8 @@
 window.addEventListener('playing',e=>{if(e.target instanceof HTMLVideoElement)e.stopImmediatePropagation();},true);
 const api=window.petClient,container=document.querySelector('#characters'),feedback=document.querySelector('#feedback');
 let roles=[],busy=false,editing=false,firstRender=false,toastTimer=0,hopId=null;const expanded=new Set(),cloneExpanded=new Set();
+// Clones (extra copies of one character) are switched off: no way to add one. Clones made earlier can still be managed and removed.
+const CLONES_ENABLED=false;
 function message(text,error=false,action=null){
  if(text&&typeof text==='object'){action=text.action;text=text.text;}
  clearTimeout(toastTimer);feedback.replaceChildren(el('span','',text));
@@ -53,12 +55,12 @@ function render(){
   toggle.onclick=()=>{const was=role.visible;if(!was)hopId=role.id;run(async()=>{roles=await api.toggle(role.id,!was);},()=>was?{text:role.name+'已隐藏',action:{label:'撤销',run:()=>run(async()=>{roles=await api.toggle(role.id,true);},role.name+'回来了')}}:role.name+'已显示在桌面');};row.append(toggle);content.append(row,el('p','role-count',`${role.actions.length} 个动作`));
   const actions=el('div','character-actions'),detailsButton=el('button','quiet',expanded.has(role.id)?'收起动作':'查看动作'),folder=el('button','quiet','角色文件夹');
   detailsButton.setAttribute('aria-expanded',String(expanded.has(role.id)));detailsButton.onclick=()=>{expanded.has(role.id)?expanded.delete(role.id):expanded.add(role.id);render();};folder.onclick=()=>run(()=>api.folder(role.id));actions.append(detailsButton,folder);
-  const clone=el('button','quiet',`添加分身（${role.cloneCount||0}/8）`);clone.disabled=busy||role.cloneCount>=8;clone.title='每个角色最多添加8个分身，本体不计入上限';clone.onclick=()=>run(async()=>{roles=await api.clone(role.id);cloneExpanded.add(role.entry);},'分身已添加并显示在桌面');actions.append(clone);
+  if(CLONES_ENABLED){const clone=el('button','quiet',`添加分身（${role.cloneCount||0}/8）`);clone.disabled=busy||role.cloneCount>=8;clone.title='每个角色最多添加8个分身，本体不计入上限';clone.onclick=()=>run(async()=>{roles=await api.clone(role.id);cloneExpanded.add(role.entry);},'分身已添加并显示在桌面');actions.append(clone);}
   const children=clones.filter(c=>c.entry===role.entry);
-  const manage=el('button','quiet',`${cloneExpanded.has(role.entry)?'收起分身':'分身管理'}（${children.length}/8）`);manage.disabled=busy;manage.setAttribute('aria-expanded',String(cloneExpanded.has(role.entry)));manage.setAttribute('aria-controls','clones-'+role.id);manage.onclick=()=>{cloneExpanded.has(role.entry)?cloneExpanded.delete(role.entry):cloneExpanded.add(role.entry);render();};actions.append(manage);
+  const manage=el('button','quiet',`${cloneExpanded.has(role.entry)?'收起分身':'分身管理'}（${children.length}/8）`);manage.disabled=busy;manage.setAttribute('aria-expanded',String(cloneExpanded.has(role.entry)));manage.setAttribute('aria-controls','clones-'+role.id);manage.onclick=()=>{cloneExpanded.has(role.entry)?cloneExpanded.delete(role.entry):cloneExpanded.add(role.entry);render();};if(CLONES_ENABLED||children.length)actions.append(manage);
   const panel=el('section','clone-panel');panel.id='clones-'+role.id;panel.hidden=!cloneExpanded.has(role.entry);panel.setAttribute('aria-label',role.name+'的分身管理');
   panel.append(el('p','clone-heading',role.name+'的分身（'+children.length+'/8）'));
-  if(!children.length)panel.append(el('p','clone-empty','还没有分身，点击“添加分身”创建。'));
+  if(!children.length)panel.append(el('p','clone-empty','还没有分身。'));
   for(const child of children){
     const item=el('div','clone-item');item.dataset.cloneId=child.id;
     const line=el('div','clone-line'),name=el('span','clone-name',child.name),state=el('span','clone-status',child.visible?'在桌面上':'休息中');line.append(name,state);

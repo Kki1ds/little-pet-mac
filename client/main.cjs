@@ -58,7 +58,7 @@ if(!app.requestSingleInstanceLock()){app.quit();}else if(process.argv.includes('
   handle('characters:set-collision',on=>service.setCollision(on));
   handle('characters:reorder',entries=>service.reorder(entries).then(publishRoles));
   handle('characters:resize',(id,size)=>service.resize(id,size).then(publishRoles));
-  handle('characters:clone',id=>service.clone(id).then(publishRoles));
+  handle('characters:clone',()=>{throw Error('分身功能已关闭');});
   handle('characters:remove-clone',id=>service.clone(id,true).then(publishRoles));
   handle('characters:toggle',(id,visible)=>service.toggle(id,visible));
   handle('characters:play',(id,name)=>service.play(id,name));
