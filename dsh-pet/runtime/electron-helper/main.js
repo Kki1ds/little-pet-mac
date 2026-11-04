@@ -1314,7 +1314,7 @@ app.whenReady().then(() => {
               return {
                 during: during,
                 released: released,
-                kept: !!(released && Math.abs(released.x - during.x) <= 1 && Math.abs(released.y - during.y) <= 1),
+                kept: !!(released && Math.abs(released.x - during.x) <= 1 && Math.abs(released.y + (d.bottomPad || 0) - during.y) <= 1),
               };
             })(),
             interactiveFlip: (function () {

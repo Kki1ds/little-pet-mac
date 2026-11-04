@@ -11,6 +11,9 @@
 const LEGACY_TOOLS_ENABLED = false; // lightweight self-use build: no website / balance items
 // Lightweight self-use build: no 碎碎念 / chat (they need a model API).
 const CHAT_TOOLS_ENABLED = false;
+// 松手时速度低于它就原地放下（px/s，CSS 像素）；高于它才算甩出去。引擎自带的 500 太敏感，放置时常被误判成抛掷。
+// （同步自上游小小桌宠2 的 engine-patch/sprite.js）
+const PLACE_FLING_SPEED = 1600;
 
 // 轻量版没有余额和碎碎念功能，它们的动画分类名会误导：合并成一组「其他动作」，动画照样能点播。
 function liteMenuTree(animations) {
@@ -73,6 +76,7 @@ class PetSprite {
       h: ((S.HIT_BOX.y1 - S.HIT_BOX.y0) / 360) * this.height,
     };
     window.__dshPetDebug.hitRect = this.hitRect;
+    window.__dshPetDebug.bottomPad = this.bottomPad;
     // 左右透明边余量（视频盒内宠物身体居中）：让边界按"身体"贴边——宠物能走到屏幕边缘，
     // 但身体永不越界（漫游/拖拽都不会弄丢宠物）。与浏览器 overlay 的 sideAllow 同一套语义。
     this.sideAllow = (S.HIT_BOX.x0 / 640) * this.size;
@@ -1080,6 +1084,7 @@ class PetSprite {
   onPointerUp(e) {
     const d = this.dragState;
     const wasDragging = d.dragging;
+    const placeTarget = this.dragTarget; // 光标对应的落点（弹簧跟随会滞后，松手按它精确放下）
     d.active = false;
     d.dragging = false;
     this.hit.classList.remove('dragging');
@@ -1130,7 +1135,8 @@ class PetSprite {
       // 初速估算：够快就抛掷（重力+边缘反弹+落地摩擦），否则原地放下
       const vel = S.estimateReleaseVelocity(this.dragTrail, performance.now(), this.physics);
       this.dragTrail = [];
-      if (vel) {
+      // 只有明显的甩动才抛出去；普通松手（哪怕手还在动）原地精确放下，不再下坠
+      if (vel && Math.hypot(vel.vx, vel.vy) >= PLACE_FLING_SPEED) {
         console.log(
           '[dsh-pet] ' +
             new Date().toTimeString().slice(0, 8) +
@@ -1147,7 +1153,9 @@ class PetSprite {
       } else {
         // customPos 语义 = 宠物**中心**比例（position() 用 rx*W - halfW 还原左上角；
         // startThrow 落定也按同一公式存），松手无边界夹取
-        this.customPos = { rx: (px + this.halfW) / VIEW.w, ry: (py + this.halfH) / VIEW.h };
+        // 拖动时舞台被拍平、松手又下移 bottomPad：窗口同步上移同样的量，人物在屏幕上纹丝不动
+        const at = placeTarget ? { x: placeTarget.x, y: placeTarget.y - this.bottomPad } : { x: px, y: py - this.bottomPad };
+        this.customPos = { rx: (at.x + this.halfW) / VIEW.w, ry: (at.y + this.halfH) / VIEW.h };
         this.position();
         // 释放后的最终窗口位置（position() 换算后，松手无夹取），冒烟断言"释放不位移"用
         window.__dshPetDebug.lastDragRelease = { x: this.pos.x, y: this.pos.y };
