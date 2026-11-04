@@ -55,6 +55,7 @@ python3 tools/macos/build_macos.py
 - 控制台界面是上游「小小桌宠2」的贴纸手账风格（`client/theme.css`，与上游文件一致；Mac 专用的补充放在 `client/theme-mac.css`），日间/夜间/跟随系统在「偏好设置」里选。其中偏好设置页、角色顺序（「编辑顺序」，存在 `~/.dsh/pet-control-client/role-order.json`）、角色碰撞开关（改各角色配置里的 `physics.petCollision` 并让宿主重载）和新手引导都来自它；上游的全屏自动让开（Windows 专用）、人设编辑和 Artemis 标志没有移植。大小滑块以 280 为 100%，范围 50%–200%。
 - 角色卡上的立绘是 `client/assets/<文件夹名>.png`（大肥鱼的文件夹是 `DeepSeek`，但海报叫 `main.png`），来自上游 2 代的 `character*.png`：Grok = `character3`、小白龙 = `character4`、小克 = `ojousama`、吉米奈 = `character11`。鼠标悬停时卡片会播放角色的第一个待机动画；没有立绘的角色（自己导入的）仍直接显示动画第一帧。
 - 分身功能已关闭：控制台没有「添加分身」，`characters:clone` 也会直接报错（`client/renderer.js` 的 `CLONES_ENABLED`、`client/main.cjs`）。以前建过的分身仍可在「分身管理」里移除。
+- 桌宠右键菜单没有「显示位置」（它的「仅网页」依赖 DSH 站点）；显示/隐藏角色用控制台开关或菜单栏菜单。
 - 拖动与 2 代一致：松手时速度低于 1600 px/s（`sprite.js` 的 `PLACE_FLING_SPEED`）就原地放下，位置取光标对应的落点；只有明显的甩动才会抛出去。松手点离屏幕底边（工作区底）不超过角色宽度的 0.45 倍时，角色会落到地面（`sprite.js` 的 `GROUND_SNAP_RATIO`，设为 0 关闭）。
 
 ## Claude Code 工作状态

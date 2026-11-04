@@ -1415,11 +1415,8 @@ class PetSprite {
     if (CHAT_TOOLS_ENABLED) tools.push({ label: '碎碎念', action: 'whisper' }, { label: '对话', action: 'chat' });
     tools.push(
       { label: '回到初始位置', action: 'home' },
-      // 显示位置（仅网页/仅桌面/两者/都不）：改这只宠物的 display 配置 + 宿主重载生效。
-      // 与浏览器端注入的是**同一份**子菜单（shared 的 displayMenuBranch），两端文案/取值不会漂移。
-      // 为什么不就地关窗/开窗：桌面宠物共用一个 Electron 进程，窗口是进程启动时按 DSH_PET_PETS
-      // 一次性建的——就地增删窗口既改不了磁盘配置（下次启动又回来）也改不了窗口数量。
-      S.displayMenuBranch(),
+      // 「显示位置」（仅网页/仅桌面/两者/都不）已从本版右键菜单去掉：「网页」依赖 DSH 站点，自用版没有；
+      // 显示/隐藏角色请用控制台开关。set-display 的处理（setPetDisplay）保留，以便需要时加回 S.displayMenuBranch()。
       // 改配置文件后免去回设置页点保存：请宿主重启桌面 Helper（全部桌面宠物窗口按最新配置重建）。
       // 放在最后：它是"重新加载"这类维护动作，与上面几个宠物互动项语义不同。
       { label: '重载配置', action: 'reload' },
