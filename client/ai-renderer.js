@@ -11,9 +11,9 @@
     <p id="ai-feedback" role="status" aria-live="polite"></p>
     <section class="ai-section" aria-labelledby="connection-title"><h2 id="connection-title">模型连接</h2>
     <form id="ai-form" class="ai-form">
-    <label for="ai-url">API 地址<input id="ai-url" type="url" required autocomplete="off" placeholder="https://api.xiaomimimo.com/v1"></label>
+    <label for="ai-url">API 地址<input id="ai-url" type="url" required autocomplete="off" placeholder="https://服务商地址/v1"></label>
     <label for="ai-model">模型名称<input id="ai-model" required maxlength="150" placeholder="填写服务商提供的模型 ID"></label>
-    <label for="ai-auth">认证方式<select id="ai-auth"><option value="api-key">MiMo（api-key）</option><option value="bearer">Bearer</option></select></label>
+    <label for="ai-auth">认证方式<select id="ai-auth"><option value="api-key">API Key 请求头</option><option value="bearer">Bearer</option></select></label>
     <label for="ai-rounds">每次携带的历史轮数<input id="ai-rounds" type="number" min="0" max="20" step="1" required></label>
     <label for="ai-key" class="ai-wide">API Key<input id="ai-key" type="password" autocomplete="new-password" spellcheck="false" maxlength="4096"><span id="ai-key-state" class="ai-hint"></span></label>
     <div class="ai-wide ai-buttons"><button type="submit" class="primary">保存设置</button><button type="button" id="ai-test" class="quiet">测试已保存的连接</button><button type="button" id="ai-remove" class="quiet">移除已保存的密钥</button></div>
@@ -25,9 +25,9 @@
     <form id="ai-chat"><label for="ai-text">对它说些什么</label><textarea id="ai-text" maxlength="4000" rows="3" required placeholder="输入消息…"></textarea><button class="primary" type="submit">发送</button><span id="ai-chat-state" role="status"></span></form>
     <p class="ai-hint">每个实例独立保存最近 500 轮对话，每次按上方轮数发送给模型；桌面显示中的角色会用气泡展示回复。此页不会自动开启碎碎念。</p></section>`;
   document.body.append(section);
-  const menu = document.createElement('details');
-  menu.className = 'settings-nav';
-  menu.innerHTML = '<summary>设置</summary><button id="open-ai">API 与角色对话</button>';
+  const menu = document.createElement('button');
+  menu.id = 'open-ai';
+  menu.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>AI 对话';
   nav.append(menu);
   const $ = id => document.getElementById(id);
   let currentRole = '', roleName = '', historyTicket = 0, sending = false, working = false;

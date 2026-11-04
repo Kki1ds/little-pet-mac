@@ -11,6 +11,12 @@
 const LEGACY_TOOLS_ENABLED = false; // lightweight self-use build: no website / balance items
 // Lightweight self-use build: no 碎碎念 / chat (they need a model API).
 const CHAT_TOOLS_ENABLED = false;
+// 松手时速度低于它就原地放下（px/s，CSS 像素）；高于它才算甩出去。引擎自带的 500 太敏感，放置时常被误判成抛掷。
+// （同步自上游小小桌宠2 的 engine-patch/sprite.js）
+const PLACE_FLING_SPEED = 1600;
+// 原地放下时，脚离屏幕底边（工作区底）不超过「角色宽度 × 此值」就让它落到地面：拖到屏幕下方会自动沉底。
+// 比这更高的位置照旧停在松手处。设为 0 关闭。
+const GROUND_SNAP_RATIO = 0.45;
 
 // 轻量版没有余额和碎碎念功能，它们的动画分类名会误导：合并成一组「其他动作」，动画照样能点播。
 function liteMenuTree(animations) {
@@ -73,6 +79,7 @@ class PetSprite {
       h: ((S.HIT_BOX.y1 - S.HIT_BOX.y0) / 360) * this.height,
     };
     window.__dshPetDebug.hitRect = this.hitRect;
+    window.__dshPetDebug.bottomPad = this.bottomPad;
     // 左右透明边余量（视频盒内宠物身体居中）：让边界按"身体"贴边——宠物能走到屏幕边缘，
     // 但身体永不越界（漫游/拖拽都不会弄丢宠物）。与浏览器 overlay 的 sideAllow 同一套语义。
     this.sideAllow = (S.HIT_BOX.x0 / 640) * this.size;
@@ -1080,6 +1087,7 @@ class PetSprite {
   onPointerUp(e) {
     const d = this.dragState;
     const wasDragging = d.dragging;
+    const placeTarget = this.dragTarget; // 光标对应的落点（弹簧跟随会滞后，松手按它精确放下）
     d.active = false;
     d.dragging = false;
     this.hit.classList.remove('dragging');
@@ -1130,7 +1138,8 @@ class PetSprite {
       // 初速估算：够快就抛掷（重力+边缘反弹+落地摩擦），否则原地放下
       const vel = S.estimateReleaseVelocity(this.dragTrail, performance.now(), this.physics);
       this.dragTrail = [];
-      if (vel) {
+      // 只有明显的甩动才抛出去；普通松手（哪怕手还在动）原地精确放下，不再下坠
+      if (vel && Math.hypot(vel.vx, vel.vy) >= PLACE_FLING_SPEED) {
         console.log(
           '[dsh-pet] ' +
             new Date().toTimeString().slice(0, 8) +
@@ -1147,7 +1156,21 @@ class PetSprite {
       } else {
         // customPos 语义 = 宠物**中心**比例（position() 用 rx*W - halfW 还原左上角；
         // startThrow 落定也按同一公式存），松手无边界夹取
-        this.customPos = { rx: (px + this.halfW) / VIEW.w, ry: (py + this.halfH) / VIEW.h };
+        // 拖动时舞台被拍平、松手又下移 bottomPad：窗口同步上移同样的量，人物在屏幕上纹丝不动
+        const at = placeTarget ? { x: placeTarget.x, y: placeTarget.y - this.bottomPad } : { x: px, y: py - this.bottomPad };
+        // 松手点靠近屏幕底边：零初速落到地面（重力 + 落地 Q 弹，落定后由 startThrow 写入 customPos）
+        if (GROUND_SNAP_RATIO > 0) {
+          const sp = this.throwSpaceOf();
+          const floor = sp.bounds[S.screenOfBox(sp, at.x, at.y)]?.maxY;
+          if (Number.isFinite(floor) && floor - at.y <= this.size * GROUND_SNAP_RATIO) {
+            // 先按松手位置摆好窗口（舞台已复位下移，窗口同步上移），再起落，避免首帧跳一下
+            this.customPos = { rx: (at.x + this.halfW) / VIEW.w, ry: (at.y + this.halfH) / VIEW.h };
+            this.position();
+            this.startThrow(at.x, at.y, 0, 0);
+            return;
+          }
+        }
+        this.customPos = { rx: (at.x + this.halfW) / VIEW.w, ry: (at.y + this.halfH) / VIEW.h };
         this.position();
         // 释放后的最终窗口位置（position() 换算后，松手无夹取），冒烟断言"释放不位移"用
         window.__dshPetDebug.lastDragRelease = { x: this.pos.x, y: this.pos.y };
@@ -1392,11 +1415,8 @@ class PetSprite {
     if (CHAT_TOOLS_ENABLED) tools.push({ label: '碎碎念', action: 'whisper' }, { label: '对话', action: 'chat' });
     tools.push(
       { label: '回到初始位置', action: 'home' },
-      // 显示位置（仅网页/仅桌面/两者/都不）：改这只宠物的 display 配置 + 宿主重载生效。
-      // 与浏览器端注入的是**同一份**子菜单（shared 的 displayMenuBranch），两端文案/取值不会漂移。
-      // 为什么不就地关窗/开窗：桌面宠物共用一个 Electron 进程，窗口是进程启动时按 DSH_PET_PETS
-      // 一次性建的——就地增删窗口既改不了磁盘配置（下次启动又回来）也改不了窗口数量。
-      S.displayMenuBranch(),
+      // 「显示位置」（仅网页/仅桌面/两者/都不）已从本版右键菜单去掉：「网页」依赖 DSH 站点，自用版没有；
+      // 显示/隐藏角色请用控制台开关。set-display 的处理（setPetDisplay）保留，以便需要时加回 S.displayMenuBranch()。
       // 改配置文件后免去回设置页点保存：请宿主重启桌面 Helper（全部桌面宠物窗口按最新配置重建）。
       // 放在最后：它是"重新加载"这类维护动作，与上面几个宠物互动项语义不同。
       { label: '重载配置', action: 'reload' },

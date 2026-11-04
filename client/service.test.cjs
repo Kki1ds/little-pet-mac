@@ -74,3 +74,29 @@ test('old character folders and default names move to the new ones once, keeping
   assert.ok(!fs.existsSync(path.join(ROOT,'ojousama')));
  }finally{f.cleanup();}
 });
+test('the collision switch writes every character that has its own physics block and nothing else',async()=>{
+ const f=fixture();try{
+  const put=(rel,obj,text)=>{const file=path.join(f.api.ROOT,rel);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,text??JSON.stringify(obj));return file;};
+  const phys=on=>({gravity:1400,restitution:0.78,groundFriction:2.5,ceilingBounce:true,throwPower:1,petCollision:on});
+  const main=put('DeepSeek/config.jsonc',null,'// 注释\n'+JSON.stringify({pets:[{id:'main'}],physics:phys(true)}));
+  const claude=put('Claude/config.json',{pets:[{id:'ojousama1'}],physics:phys(true)});
+  const plain=put('Gemini/config.json',{pets:[{id:'character11'}]});
+  const before=fs.readFileSync(plain,'utf8');
+  assert.equal(f.api.collision(),true);
+  assert.equal(await f.api.setCollision(false),false);
+  const read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\s*\/\/.*$/gm,''));
+  assert.equal(read(main).physics.petCollision,false);
+  assert.equal(read(claude).physics.petCollision,false);
+  assert.equal(fs.readFileSync(plain,'utf8'),before);
+  assert.equal(await f.api.setCollision(true),true);
+  assert.equal(read(claude).physics.petCollision,true);
+ }finally{f.cleanup();}
+});
+test('the card order is stored as a list of valid character names',async()=>{
+ const f=fixture();try{
+  await assert.rejects(f.api.reorder(['../x']),/排序数据无效/);
+  await assert.rejects(f.api.reorder('Grok'),/排序数据无效/);
+  await f.api.reorder(['Gemini','main','main']);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.home,'.dsh','pet-control-client','role-order.json'),'utf8')),['Gemini','main']);
+ }finally{f.cleanup();}
+});

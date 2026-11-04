@@ -186,10 +186,32 @@ async function list() {
     if(packaged&&!fs.existsSync(file)&&!fs.existsSync(file.slice(0,-5)+'.mov'))file=path.join(SEED_ROOT,dirOf(entry),'animations',preview+'.webm');
     // macOS: console previews play the hardware-decoded .mov (the build ships only the .mov).
     const mov=file.slice(0,-5)+'.mov';if(process.platform==='darwin'&&fs.existsSync(mov))file=mov;
-    let poster='';const posterFile=path.join(__dirname,'assets',entry+'.png');if(fs.existsSync(posterFile))poster='data:image/png;base64,'+fs.readFileSync(posterFile).toString('base64');
+    const poster=posterOf(entry);
     roles.push({cloneCount:Math.max(0,cfg.pets.length-1),cloneLimit:8,isClone:pet.id!==cfg.pets[0].id&&/__clone_[1-8]$/.test(pet.id),id:pet.id,entry,name:pet.name||pet.id,visible:['desktop','both'].includes(pet.display),size:pet.size,actions:animationNames(cfg.animations),idle:preview,poster,project:entry==='main'&&!fs.existsSync(projectDir(entry))?path.join(HOME,'dsh-pet'):projectDir(entry),preview:fs.existsSync(file)?require('node:url').pathToFileURL(file).href:''});
   }
-  return roles;
+  return sortRoles(roles);
+}
+// Cover posters (client/assets/<entry>.png, entry = folder name; main = 大肥鱼). Read once, kept as data URIs.
+const posterCache=new Map();
+function posterOf(entry){
+  if(posterCache.has(entry))return posterCache.get(entry);
+  let poster='';const file=path.join(__dirname,'assets',entry+'.png');
+  if(/^[a-zA-Z0-9_-]+$/.test(entry)&&fs.existsSync(file))poster='data:image/png;base64,'+fs.readFileSync(file).toString('base64');
+  posterCache.set(entry,poster);return poster;
+}
+// Card order: the user's own order (role-order.json) first, then the built-in characters in their usual order, then the rest by age.
+const ORDER_FILE=path.join(HOME,'pet-control-client','role-order.json');
+const DEFAULT_ORDER=['main','Grok','GPT','Claude','Gemini'];
+function readOrder(){try{const a=JSON.parse(fs.readFileSync(ORDER_FILE,'utf8'));return Array.isArray(a)?a.filter(x=>typeof x==='string'):[];}catch{return [];}}
+function made(entry){try{return fs.statSync(projectDir(entry)).birthtimeMs;}catch{return Infinity;}}
+function sortRoles(roles){
+  const custom=readOrder(),rank=r=>{const i=custom.indexOf(r.entry);if(i>=0)return i;const d=DEFAULT_ORDER.indexOf(r.entry);return d>=0?1e3+d:1e6;};
+  const born={};for(const r of roles)born[r.entry]??=made(r.entry);
+  return roles.map((r,i)=>[r,i]).sort((a,b)=>rank(a[0])-rank(b[0])||born[a[0].entry]-born[b[0].entry]||a[1]-b[1]).map(x=>x[0]);
+}
+async function reorder(entries){
+  if(!Array.isArray(entries)||entries.some(x=>typeof x!=='string'||!/^[a-zA-Z0-9_-]+$/.test(x)))throw Error('排序数据无效');
+  fs.mkdirSync(path.dirname(ORDER_FILE),{recursive:true});writeAtomic(ORDER_FILE,JSON.stringify([...new Set(entries)]));return list();
 }
 async function find(id){const item=(await list()).find(r=>r.id===id);if(!item)throw Error('找不到这个角色，请刷新列表');return item;}
 let writes=Promise.resolve();
@@ -226,4 +248,35 @@ async function restartServer(reason){
   try {await stopServer(reason);} catch(e){if(!['ECONNREFUSED','ECONNRESET'].includes(e.code))throw e;}
   await ensureServer();
 }
-module.exports={setSharedProcess,restartServer,syncActions,migrateCharacters,migrationPending,quickHiddenFile,restoreQuickHidden,restSeconds,setRestSeconds,PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};
+// Pet collision is a `physics` block in the character configs: the main character's is the global default, any other
+// character that has its own block overrides it. The toggle in the console writes all of them, then asks the host to reload.
+const PHYSICS_DEFAULT={gravity:1400,restitution:0.78,groundFriction:2.5,ceilingBounce:true,throwPower:1.0,petCollision:false};
+function physicsFiles(){
+  const out=[];
+  if(fs.existsSync(ROOT))for(const dir of fs.readdirSync(ROOT,{withFileTypes:true})){
+    if(!dir.isDirectory())continue;
+    for(const name of ['config.json','config.jsonc']){const file=path.join(ROOT,dir.name,name);if(fs.existsSync(file)){out.push({file,main:entryOf(dir.name)==='main'});break;}}
+  }
+  return out;
+}
+function readJson(file){return JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'').replace(/^\s*\/\/.*$/gm,''));}
+function collision(){
+  try{
+    const files=physicsFiles(),main=files.find(f=>f.main);
+    if(!main||readJson(main.file).physics?.petCollision!==true)return false;
+    return files.every(f=>{const ph=readJson(f.file).physics;return !ph||ph.petCollision===true;});
+  }catch{return false;}
+}
+function setCollision(on){
+  const operation=writes.then(async()=>{
+    for(const f of physicsFiles()){
+      let cfg;try{cfg=readJson(f.file);}catch{continue;}
+      if(!f.main&&!cfg.physics)continue;
+      cfg.physics={...PHYSICS_DEFAULT,...(cfg.physics||{}),petCollision:on===true};
+      writeAtomic(f.file,JSON.stringify(cfg,null,2));
+    }
+    await request(base+'/reload','POST',{});return collision();
+  });
+  writes=operation.catch(()=>{});return operation;
+}
+module.exports={reorder,collision,setCollision,setSharedProcess,restartServer,syncActions,migrateCharacters,migrationPending,quickHiddenFile,restoreQuickHidden,restSeconds,setRestSeconds,PACKAGE,HOME,ROOT,request,ensureServer,list,find,toggle,play,importProject,projectDir,setChatBridge,clone,resize};
