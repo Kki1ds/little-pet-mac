@@ -11,6 +11,7 @@
     Claude: Object.freeze({ '640x360':329, '1280x720':630, '1280x960':878 }),
     Grok: Object.freeze({ '1280x720':634, '1280x960':851 }),
     GPT: Object.freeze({ '1280x720':630, '1280x960':850 }),
+    Gemini: Object.freeze({ '1280x960':851 }),
   });
   // The macOS build ships 1280-wide clips as 960-wide HEVC (tools/macos/hevc/encode_mov.py --max-width);
   // a calibrated character's 960-wide clip is laid out in its 1280 master's pixels.

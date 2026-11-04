@@ -29,7 +29,7 @@ function liteMenuTree(animations) {
 
 // 两个动作之间的待机时长：控制台可调（见 preload restSeconds），未设置时 20 秒；0 = 原版行为（动作接连播放）
 // Bundled characters (and upstream-style characterN packs) that rotate their own 小动作 playlist.
-const PLAYLIST_ROOTS = ['Claude', 'Grok', 'GPT'];
+const PLAYLIST_ROOTS = ['Claude', 'Grok', 'GPT', 'Gemini'];
 function playlistRoot(root) {
   return PLAYLIST_ROOTS.includes(root) || /^character\d+$/.test(root);
 }
