@@ -45,3 +45,5 @@ Windows 客户端在 `client/`，六角色配置、成品动画和人设在 `cha
 Windows 可使用 `tools/client-release/build-1.0.5.py` 配合已有 Electron 与 Node 运行环境构建。GitHub 自动生成的 Source code 是源码；直接使用请下载上面的完整客户端 ZIP。
 
 [完整使用步骤与常见问题](使用说明.md) · [本版动作列表](docs/RELEASE-CONTENT-1.0.5.json)
+
+<!-- last reviewed: 2026-11-17 -->
